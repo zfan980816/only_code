@@ -202,3 +202,83 @@ button { cursor: pointer; }
   padding: 0 14px; background: var(--surface);
   border-top: 1px solid var(--border); color: var(--muted); font-size: 12px;
 }
+
+/* quick open */
+.quick-open-overlay {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(0,0,0,.3); display: flex;
+  justify-content: center; padding-top: 80px;
+}
+.quick-open-modal {
+  width: 560px; max-height: 400px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 8px 30px rgba(0,0,0,.15); overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.quick-open-input {
+  border: 0; border-bottom: 1px solid var(--border);
+  padding: 14px 16px; font-size: 15px; background: var(--surface);
+  color: var(--text); outline: none;
+}
+.quick-open-hint { padding: 6px 16px; font-size: 11px; color: var(--muted); border-bottom: 1px solid var(--border); }
+.quick-open-list { overflow-y: auto; flex: 1; }
+.quick-open-item {
+  width: 100%; text-align: left; padding: 9px 16px;
+  border: 0; background: transparent; color: var(--text);
+  font-size: 13px; cursor: pointer;
+}
+.quick-open-item.active { background: rgba(14,165,233,.08); color: var(--accent-strong); }
+
+/* bookmarks */
+.bookmark-panel { padding: 8px; flex: 1; overflow: auto; }
+.bookmark-item { display: flex; align-items: center; gap: 4px; margin-bottom: 2px; }
+.bookmark-open {
+  flex: 1; text-align: left; border: 0; background: transparent;
+  color: var(--text); padding: 7px 8px; border-radius: 6px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px;
+}
+.bookmark-open:hover { background: var(--surface-2); }
+.bookmark-remove {
+  border: 0; background: transparent; color: var(--muted);
+  padding: 4px 8px; border-radius: 4px; font-size: 12px;
+}
+.bookmark-remove:hover { color: #dc2626; background: var(--surface-2); }
+
+/* star button */
+.viewer-actions { position: absolute; top: 4px; right: 12px; z-index: 5; }
+.bookmark-star {
+  border: 0; background: transparent; color: var(--muted);
+  font-size: 20px; cursor: pointer; padding: 4px 8px; border-radius: 6px;
+}
+.bookmark-star.active { color: #f59e0b; }
+.bookmark-star:hover { background: var(--surface-2); }
+
+/* tree toolbar */
+.tree-toolbar { padding: 6px 8px 2px; }
+.toolbar-btn {
+  width: 100%; text-align: left; border: 1px dashed var(--border);
+  background: transparent; color: var(--muted); padding: 8px 10px;
+  border-radius: 6px; font-size: 12px; cursor: pointer;
+}
+.toolbar-btn:hover { border-color: var(--accent); color: var(--accent-strong); }
+
+/* find refs button */
+.find-refs-btn {
+  margin-top: 8px; width: 100%; border: 1px solid var(--border);
+  background: var(--surface); color: var(--accent-strong);
+  padding: 7px; border-radius: 6px; font-size: 12px; cursor: pointer; font-weight: 500;
+}
+.find-refs-btn:hover { background: rgba(14,165,233,.06); }
+
+/* refs list */
+.refs-list { max-height: 200px; overflow-y: auto; }
+.refs-list button {
+  width: 100%; text-align: left; border: 0; background: transparent;
+  color: var(--text); padding: 6px 8px; border-radius: 6px;
+  display: flex; flex-direction: column; gap: 1px;
+}
+.refs-list button:hover { background: rgba(14,165,233,.06); }
+.ref-kind { font-size: 10px; color: var(--muted); text-transform: uppercase; }
+.ref-name { font-weight: 500; }
+.refs-list small { color: var(--muted); font-size: 11px; }
+

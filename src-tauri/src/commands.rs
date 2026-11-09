@@ -280,3 +280,90 @@ pub fn resolve_definition(
 }
 
 
+
+#[tauri::command]
+pub fn find_references(
+    workspace_id: String,
+    name: String,
+) -> Result<Vec<NavigationTarget>, String> {
+    let _root = workspace_root(&workspace_id)?;
+    let symbols = workspace_symbols(&workspace_id)?;
+    let targets: Vec<NavigationTarget> = symbols
+        .iter()
+        .filter(|symbol| {
+            symbol.name.contains(&name)
+                && matches!(
+                    symbol.kind.as_str(),
+                    "function" | "method" | "class" | "interface" | "type" | "constant"
+                )
+        })
+        .map(|symbol| NavigationTarget {
+            path: symbol.path.clone(),
+            name: symbol.name.clone(),
+            kind: symbol.kind.clone(),
+            start: symbol.start,
+            end: symbol.end,
+            start_line: symbol.start_line + 1,
+            start_column: symbol.start_column + 1,
+        })
+        .take(200)
+        .collect();
+    Ok(targets)
+}
+
+#[tauri::command]
+pub fn fuzzy_files(
+    workspace_id: String,
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<String>, String> {
+    let root = workspace_root(&workspace_id)?;
+    let max = limit.unwrap_or(50).min(200);
+    let walker = ignore::WalkBuilder::new(&root)
+        .hidden(true)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .parents(true)
+        .require_git(false)
+        .build();
+
+    let query_lower = query.to_lowercase();
+    let mut results: Vec<(usize, String)> = Vec::new();
+
+    for entry in walker.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let relative = path
+            .strip_prefix(&root)
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_else(|_| path.to_string_lossy().replace('\\', "/"));
+
+        if query_lower.is_empty() {
+            results.push((relative.len(), relative));
+        } else {
+            let path_lower = relative.to_lowercase();
+            let mut score = 0usize;
+            let mut query_idx = 0usize;
+            for (path_idx, ch) in path_lower.char_indices() {
+                if query_idx < query_lower.len() && ch == query_lower.chars().nth(query_idx).unwrap_or('\0') {
+                    score += 100 - path_idx.min(99);
+                    query_idx += query_lower.chars().next().map(|c| c.len_utf8()).unwrap_or(1);
+                }
+            }
+            if query_idx >= query_lower.len() {
+                results.push((score, relative));
+            }
+        }
+        if results.len() > max * 4 {
+            results.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.len().cmp(&b.1.len())));
+            results.truncate(max);
+        }
+    }
+
+    results.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.len().cmp(&b.1.len())));
+    results.truncate(max);
+    Ok(results.into_iter().map(|(_, path)| path).collect())
+}

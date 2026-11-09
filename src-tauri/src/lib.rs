@@ -20,8 +20,12 @@ pub fn run() {
             commands::highlight,
             commands::outline,
             commands::search,
-            commands::resolve_definition
+            commands::resolve_definition,
+            commands::find_references,
+            commands::fuzzy_files
         ])
         .run(tauri::generate_context!())
         .expect("error while running Light Reader");
 }
+
+

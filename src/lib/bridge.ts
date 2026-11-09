@@ -41,6 +41,10 @@ export const backend = {
       query,
       options,
     }),
+  findReferences: (workspaceId: string, name: string) =>
+    call<NavigationTarget[]>("find_references", { workspaceId, name }),
+  fuzzyFiles: (workspaceId: string, query: string, limit?: number) =>
+    call<string[]>("fuzzy_files", { workspaceId, query, limit }),
   resolveDefinition: (workspaceId: string, path: string, start: number, end?: number) =>
     call<NavigationTarget[]>("resolve_definition", {
       workspaceId,
@@ -49,3 +53,5 @@ export const backend = {
       end,
     }),
 };
+
+
