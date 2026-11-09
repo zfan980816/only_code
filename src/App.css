@@ -244,8 +244,6 @@ button { cursor: pointer; }
 }
 .bookmark-remove:hover { color: #dc2626; background: var(--surface-2); }
 
-/* star button */
-.viewer-actions { position: absolute; top: 4px; right: 12px; z-index: 5; }
 .bookmark-star {
   border: 0; background: transparent; color: var(--muted);
   font-size: 20px; cursor: pointer; padding: 4px 8px; border-radius: 6px;
@@ -281,4 +279,13 @@ button { cursor: pointer; }
 .ref-kind { font-size: 10px; color: var(--muted); text-transform: uppercase; }
 .ref-name { font-weight: 500; }
 .refs-list small { color: var(--muted); font-size: 11px; }
+
+
+.main-pane { position: relative; overflow: hidden; }
+
+
+
+.bookmark-star { border:0; background:transparent; color:var(--muted); font-size:20px; cursor:pointer; padding:2px 6px; border-radius:4px; }
+.bookmark-star.active { color:#f59e0b; }
+.bookmark-star:hover { background:var(--surface-2); }
 

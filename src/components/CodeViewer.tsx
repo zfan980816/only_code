@@ -1,12 +1,12 @@
 import { useEffect, useRef } from "react";
 import { EditorState, StateEffect, StateField } from "@codemirror/state";
-import type { Range } from '@codemirror/state';
+import type { Range } from "@codemirror/state";
 import { Decoration, EditorView, keymap, lineNumbers } from "@codemirror/view";
+import type { DecorationSet } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { foldGutter, foldKeymap } from "@codemirror/language";
 import { highlightSelectionMatches, searchKeymap } from "@codemirror/search";
-import type { DecorationSet } from "@codemirror/view";
-import type { FileDocument, HighlightSpan } from '../types';
+import type { FileDocument, HighlightSpan } from "../types";
 
 const setHighlights = StateEffect.define<HighlightSpan[]>();
 
@@ -39,15 +39,17 @@ function buildHighlightField() {
 }
 
 interface CodeViewerProps {
-  hint?: string;
-  emptyLabel?: string;
   file: FileDocument | null;
   activePath: string | null;
   onDefinitionClick: (path: string, position: number) => void;
   scrollTarget: { path: string; start: number } | null;
+  hint?: string;
+  emptyLabel?: string;
+  isBookmarked?: boolean;
+  onToggleBookmark?: () => void;
 }
 
-export function CodeViewer({ file, activePath, onDefinitionClick, scrollTarget, hint, emptyLabel }: CodeViewerProps) {
+export function CodeViewer({ file, activePath, onDefinitionClick, scrollTarget, hint, emptyLabel, isBookmarked, onToggleBookmark }: CodeViewerProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
   const definitionClickRef = useRef(onDefinitionClick);
@@ -57,7 +59,6 @@ export function CodeViewer({ file, activePath, onDefinitionClick, scrollTarget, 
 
   useEffect(() => {
     if (!hostRef.current) return;
-
     const view = new EditorView({
       parent: hostRef.current,
       state: EditorState.create({
@@ -107,7 +108,6 @@ export function CodeViewer({ file, activePath, onDefinitionClick, scrollTarget, 
       view.destroy();
       viewRef.current = null;
     };
-    // activePath is intentionally captured once for the editor's lifetime.
   }, [activePath]);
 
   useEffect(() => {
@@ -138,20 +138,20 @@ export function CodeViewer({ file, activePath, onDefinitionClick, scrollTarget, 
         {file ? (
           <span className={`language-chip ${file.language}`}>
             {file.language}
-            {file.truncated ? " · truncated" : ""}
+            {file.truncated ? " \u00b7 truncated" : ""}
           </span>
         ) : null}
-        <span className="viewer-hint">{hint ?? "Ctrl / ⌘ + click a symbol to jump"}</span>
+        <span className="viewer-hint">{hint ?? "Ctrl / \u2318 + click a symbol to jump"}</span>
+        {onToggleBookmark ? (
+          <button
+            className={`bookmark-star ${isBookmarked ? "active" : ""}`}
+            onClick={onToggleBookmark}
+          >
+            {isBookmarked ? "\u2605" : "\u2606"}
+          </button>
+        ) : null}
       </div>
       <div ref={hostRef} className="editor-host" />
     </div>
   );
 }
-
-
-
-
-
-
-
-

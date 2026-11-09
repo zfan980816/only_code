@@ -351,16 +351,10 @@ export default function App() {
         </aside>
 
         <section className="main-pane">
-          <div className="viewer-actions">
-            {activePath ? (
-              <button className={`bookmark-star ${isBookmarked ? "active" : ""}`} onClick={() => toggleBookmark(activePath)} title={isBookmarked ? tr("removeBookmark") : tr("addBookmark")}>
-                {isBookmarked ? "★" : "☆"}
-              </button>
-            ) : null}
-          </div>
           <CodeViewer file={fileDocument} activePath={activePath}
             onDefinitionClick={(p, pos) => void handleDefinitionClick(p, pos)}
-            scrollTarget={scrollTarget} hint={tr("ctrlClickHint")} emptyLabel={tr("noFileSelected")} />
+            scrollTarget={scrollTarget} hint={tr("ctrlClickHint")} emptyLabel={tr("noFileSelected")}
+                        isBookmarked={isBookmarked} onToggleBookmark={() => { if (activePath) toggleBookmark(activePath); }} />
         </section>
 
         <aside className="context-pane">
@@ -426,6 +420,8 @@ export default function App() {
     </div>
   );
 }
+
+
 
 
 
