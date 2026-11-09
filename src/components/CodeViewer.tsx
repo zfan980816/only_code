@@ -39,13 +39,15 @@ function buildHighlightField() {
 }
 
 interface CodeViewerProps {
+  hint?: string;
+  emptyLabel?: string;
   file: FileDocument | null;
   activePath: string | null;
   onDefinitionClick: (path: string, position: number) => void;
   scrollTarget: { path: string; start: number } | null;
 }
 
-export function CodeViewer({ file, activePath, onDefinitionClick, scrollTarget }: CodeViewerProps) {
+export function CodeViewer({ file, activePath, onDefinitionClick, scrollTarget, hint, emptyLabel }: CodeViewerProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
   const definitionClickRef = useRef(onDefinitionClick);
@@ -132,19 +134,21 @@ export function CodeViewer({ file, activePath, onDefinitionClick, scrollTarget }
   return (
     <div className="code-viewer">
       <div className="viewer-toolbar">
-        <span className="viewer-path">{activePath ?? "No file selected"}</span>
+        <span className="viewer-path">{activePath ?? emptyLabel ?? "No file selected"}</span>
         {file ? (
           <span className={`language-chip ${file.language}`}>
             {file.language}
             {file.truncated ? " · truncated" : ""}
           </span>
         ) : null}
-        <span className="viewer-hint">Ctrl / ⌘ + click a symbol to jump</span>
+        <span className="viewer-hint">{hint ?? "Ctrl / ⌘ + click a symbol to jump"}</span>
       </div>
       <div ref={hostRef} className="editor-host" />
     </div>
   );
 }
+
+
 
 
 

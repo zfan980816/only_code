@@ -15,6 +15,85 @@ import type {
 } from "./types";
 
 const RECENT_KEY = "light-reader.recents";
+const LOCALE_KEY = "light-reader.locale";
+
+type Locale = "zh" | "en";
+
+const t = (locale: Locale, key: string): string => {
+  const dict: Record<Locale, Record<string, string>> = {
+    zh: {
+      ready: "就绪",
+      openFolder: "打开文件夹",
+      noWorkspace: "未打开工作区",
+      files: "文件",
+      search: "搜索",
+      recent: "最近",
+      outline: "大纲",
+      definitions: "定义",
+      noFileSelected: "未选择文件",
+      noSymbols: "此文件没有可识别的符号",
+      ctrlClickHint: "Ctrl/⌘ + 点击符号跳转到定义",
+      searchPlaceholder: "搜索代码…",
+      noMatchesYet: "暂无匹配结果",
+      searchAcrossWorkspace: "跨工作区搜索",
+      resultLimitReached: "已达结果上限",
+      fileSearched: "个文件 · 已搜索",
+      browserPreviewNote:
+        "浏览器预览仅显示 UI。运行 npm run tauri dev 以使用本地工作区后端。",
+      nativeBackendRequired: "需要桌面后端才能打开工作区。",
+      openingWorkspace: "正在打开工作区…",
+      opening: "正在打开",
+      indexComplete: "索引完成",
+      indexing: "索引中",
+      workspaceChanged: "工作区变更 — 正在刷新索引…",
+      refreshingIndex: "正在刷新索引…",
+      noDefinitionFound: "未找到该符号的定义",
+      noSymbolUnderCursor: "光标下没有符号",
+      indexed: "已索引",
+      symbols: "符号",
+      imports: "导入",
+      readOnly: "只读 · 本地优先 · 无遥测",
+      searching: "搜索中…",
+      filesLabel: "个文件",
+    },
+    en: {
+      ready: "Ready",
+      openFolder: "Open Folder",
+      noWorkspace: "No workspace",
+      files: "Files",
+      search: "Search",
+      recent: "Recent",
+      outline: "Outline",
+      definitions: "Definitions",
+      noFileSelected: "No file selected",
+      noSymbols: "No supported symbols in this file",
+      ctrlClickHint: "Ctrl/⌘ + click a symbol to jump",
+      searchPlaceholder: "Search code…",
+      noMatchesYet: "No matches yet.",
+      searchAcrossWorkspace: "Search across the workspace.",
+      resultLimitReached: "Result limit reached.",
+      fileSearched: " files · ",
+      browserPreviewNote:
+        "Browser preview shows UI only. Run npm run tauri dev to use the local workspace backend.",
+      nativeBackendRequired: "The native backend is required to open a workspace.",
+      openingWorkspace: "Opening workspace…",
+      opening: "Opening",
+      indexComplete: "Index complete",
+      indexing: "Indexing",
+      workspaceChanged: "Workspace changed — refreshing index…",
+      refreshingIndex: "Refreshing index…",
+      noDefinitionFound: "No definition found for this symbol.",
+      noSymbolUnderCursor: "No symbol under cursor",
+      indexed: "Indexed",
+      symbols: "Symbols",
+      imports: "Imports",
+      readOnly: "Read-only · local-first · no telemetry",
+      searching: "Searching…",
+      filesLabel: " files · ",
+    },
+  };
+  return dict[locale][key] ?? key;
+};
 
 function mergeSearchResults(previous: SearchResult[], incoming: SearchResult[]): SearchResult[] {
   const map = new Map(previous.map((result) => [result.path, result]));
@@ -34,13 +113,26 @@ function mergeSearchResults(previous: SearchResult[], incoming: SearchResult[]):
 }
 
 export default function App() {
+  const [locale, setLocaleState] = useState<Locale>(() => {
+    try {
+      return (localStorage.getItem(LOCALE_KEY) as Locale) || "zh";
+    } catch {
+      return "zh";
+    }
+  });
+  const setLocale = useCallback((value: Locale) => {
+    setLocaleState(value);
+    localStorage.setItem(LOCALE_KEY, value);
+  }, []);
+  const tr = useCallback((key: string) => t(locale, key), [locale]);
+
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [treeNodes, setTreeNodes] = useState<TreeNode[]>([]);
   const [activePath, setActivePath] = useState<string | null>(null);
   const [fileDocument, setFileDocument] = useState<FileDocument | null>(null);
   const [outline, setOutline] = useState<Symbol[]>([]);
   const [definitions, setDefinitions] = useState<NavigationTarget[]>([]);
-  const [status, setStatus] = useState("Ready");
+  const [status, setStatus] = useState(() => t(locale === "zh" ? "zh" : "en", "ready"));
   const [sidebarTab, setSidebarTab] = useState<"files" | "search">("files");
   const [searchQuery, setSearchQuery] = useState("");
   const [caseSensitive, setCaseSensitive] = useState(false);
@@ -66,7 +158,7 @@ export default function App() {
     async (path: string) => {
       if (!workspace) return;
       setActivePath(path);
-      setStatus(`Opening ${path}…`);
+      setStatus(`${tr("opening")} ${path}…`);
       setDefinitions([]);
       try {
         const [document, symbols] = await Promise.all([
@@ -88,18 +180,18 @@ export default function App() {
         setStatus(cause instanceof Error ? cause.message : String(cause));
       }
     },
-    [workspace],
+    [tr, workspace],
   );
 
   const openFolder = useCallback(async () => {
     if (!isTauri()) {
-      setStatus("The native backend is required to open a workspace.");
+      setStatus(tr("nativeBackendRequired"));
       return;
     }
     try {
-      const selected = await open({ directory: true, multiple: false, title: "Open code folder" });
+      setStatus(tr("openingWorkspace"));
+      const selected = await open({ directory: true, multiple: false, title: tr("openFolder") });
       if (!selected) return;
-      setStatus("Opening workspace…");
       const opened = await backend.openWorkspace(selected);
       setWorkspace(opened);
       setActivePath(null);
@@ -108,11 +200,11 @@ export default function App() {
       setSearchResults([]);
       setSearchQuery("");
       await loadTree(opened.id);
-      setStatus(`${opened.name} indexed ${opened.indexedFiles} files`);
+      setStatus(`${opened.name} · ${opened.indexedFiles} ${tr("indexed")}`);
     } catch (cause) {
       setStatus(cause instanceof Error ? cause.message : String(cause));
     }
-  }, [loadTree]);
+  }, [loadTree, tr]);
 
   useEffect(() => {
     if (!workspace) return;
@@ -121,7 +213,9 @@ export default function App() {
       listen<IndexProgress>("index_progress", (event) => {
         if (event.payload.workspaceId !== workspace.id || disposed) return;
         setStatus(
-          `${event.payload.phase === "complete" ? "Index complete" : "Indexing"} · ${event.payload.indexedFiles} files`,
+          event.payload.phase === "complete"
+            ? `${tr("indexComplete")} · ${event.payload.indexedFiles} ${tr("indexed")}`
+            : `${tr("indexing")} · ${event.payload.indexedFiles}`,
         );
         if (event.payload.phase === "complete") {
           void loadTree(workspace.id);
@@ -129,7 +223,7 @@ export default function App() {
       }),
       listen<string[]>("files_changed", (event) => {
         if (event.payload.includes(workspace.id)) {
-          setStatus("Workspace changed — refreshing index…");
+          setStatus(tr("workspaceChanged"));
           void loadTree(workspace.id);
         }
       }),
@@ -138,7 +232,7 @@ export default function App() {
       disposed = true;
       promises.forEach((promise) => promise.then((unlisten) => unlisten()));
     };
-  }, [loadTree, workspace]);
+  }, [loadTree, tr, workspace]);
 
   useEffect(() => {
     if (!workspace) return;
@@ -149,7 +243,7 @@ export default function App() {
       return;
     }
     const runId = ++searchRun.current;
-    setStatus("Searching…");
+    setStatus(tr("searching"));
     setSearchResults([]);
     const timer = window.setTimeout(async () => {
       try {
@@ -170,7 +264,7 @@ export default function App() {
         setSearchTruncated(response.truncated);
         setSidebarTab("search");
         setStatus(
-          `${response.results.length} file${response.results.length === 1 ? "" : "s"} · ${response.filesSearched} searched${response.truncated ? " · limit reached" : ""}`,
+          `${response.results.length} ${tr("filesLabel")}${tr("fileSearched")}${response.filesSearched}${response.truncated ? " · " + tr("resultLimitReached") : ""}`,
         );
       } catch (cause) {
         if (searchRun.current === runId) {
@@ -179,7 +273,7 @@ export default function App() {
       }
     }, 180);
     return () => window.clearTimeout(timer);
-  }, [caseSensitive, regexMode, searchQuery, wholeWord, workspace]);
+  }, [caseSensitive, regexMode, searchQuery, tr, wholeWord, workspace]);
 
   const handleDefinitionClick = useCallback(
     async (path: string, position: number) => {
@@ -191,13 +285,13 @@ export default function App() {
           await selectFile(targets[0].path);
           setScrollTarget({ path: targets[0].path, start: targets[0].start });
         } else {
-          setStatus("No definition found for this symbol.");
+          setStatus(tr("noDefinitionFound"));
         }
       } catch (cause) {
         setStatus(cause instanceof Error ? cause.message : String(cause));
       }
     },
-    [selectFile, workspace],
+    [selectFile, tr, workspace],
   );
 
   const importCount = useMemo(
@@ -206,30 +300,43 @@ export default function App() {
   );
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${locale === "en" ? "locale-en" : "locale-zh"}`}>
       <header className="app-header">
         <div className="brand">
           <span className="logo">LR</span>
           <div>
             <strong>Light Reader</strong>
-            <small>Read-first code explorer</small>
+            <small>{tr("readOnly")}</small>
           </div>
         </div>
         <div className="workspace-details">
-          <span>{workspace ? workspace.name : "No workspace"}</span>
+          <span>{workspace ? workspace.name : tr("noWorkspace")}</span>
           {workspace ? <small title={workspace.root}>{workspace.root}</small> : null}
         </div>
-        <button className="primary-button" onClick={openFolder}>
-          Open Folder
-        </button>
+        <div className="header-actions">
+          <div className="locale-switch">
+            <button
+              className={locale === "zh" ? "active" : ""}
+              onClick={() => setLocale("zh")}
+              title="切换到中文"
+            >
+              中文
+            </button>
+            <button
+              className={locale === "en" ? "active" : ""}
+              onClick={() => setLocale("en")}
+              title="Switch to English"
+            >
+              EN
+            </button>
+          </div>
+          <button className="primary-button" onClick={openFolder}>
+            {tr("openFolder")}
+          </button>
+        </div>
       </header>
 
-      {!isTauri() ? (
-        <div className="browser-note">
-          Browser preview shows UI only. Run <code>npm run tauri dev</code> to use the local
-          workspace backend.
-        </div>
-      ) : null}
+      {!isTauri() ? <div className="browser-note">{tr("browserPreviewNote")}</div> : null}
 
       <main className="workspace-layout">
         <aside className="sidebar">
@@ -238,13 +345,13 @@ export default function App() {
               className={sidebarTab === "files" ? "active" : ""}
               onClick={() => setSidebarTab("files")}
             >
-              Files
+              {tr("files")}
             </button>
             <button
               className={sidebarTab === "search" ? "active" : ""}
               onClick={() => setSidebarTab("search")}
             >
-              Search
+              {tr("search")}
             </button>
           </div>
 
@@ -258,7 +365,7 @@ export default function App() {
               />
               {recents.length > 0 ? (
                 <div className="recent-panel">
-                  <h4>Recent</h4>
+                  <h4>{tr("recent")}</h4>
                   {recents.slice(0, 8).map((path) => (
                     <button key={path} onClick={() => void selectFile(path)} title={path}>
                       {path}
@@ -272,7 +379,7 @@ export default function App() {
               <input
                 value={searchQuery}
                 onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="Search code…"
+                placeholder={tr("searchPlaceholder")}
                 spellCheck={false}
               />
               <div className="search-options">
@@ -304,10 +411,12 @@ export default function App() {
               <div className="search-results">
                 {searchResults.length === 0 ? (
                   <div className="empty-note">
-                    {searchQuery.trim() ? "No matches yet." : "Search across the workspace."}
+                    {searchQuery.trim() ? tr("noMatchesYet") : tr("searchAcrossWorkspace")}
                   </div>
                 ) : null}
-                {searchTruncated ? <div className="tree-error">Result limit reached.</div> : null}
+                {searchTruncated ? (
+                  <div className="tree-error">{tr("resultLimitReached")}</div>
+                ) : null}
                 {searchResults.map((result) => (
                   <div key={result.path} className="result-group">
                     <button className="result-file" onClick={() => void selectFile(result.path)}>
@@ -337,15 +446,17 @@ export default function App() {
             activePath={activePath}
             onDefinitionClick={(path, position) => void handleDefinitionClick(path, position)}
             scrollTarget={scrollTarget}
+            hint={tr("ctrlClickHint")}
+            emptyLabel={tr("noFileSelected")}
           />
         </section>
 
         <aside className="context-pane">
           <div className="context-block">
-            <h4>Outline</h4>
+            <h4>{tr("outline")}</h4>
             <div className="outline-list">
               {outline.length === 0 ? (
-                <div className="empty-note">No supported symbols in this file.</div>
+                <div className="empty-note">{tr("noSymbols")}</div>
               ) : null}
               {outline.map((symbol, index) => (
                 <button
@@ -365,9 +476,9 @@ export default function App() {
           </div>
 
           <div className="context-block">
-            <h4>Definitions</h4>
+            <h4>{tr("definitions")}</h4>
             {definitions.length === 0 ? (
-              <div className="empty-note">Ctrl / ⌘ + click a symbol.</div>
+              <div className="empty-note">{tr("ctrlClickHint")}</div>
             ) : null}
             {definitions.map((target, index) => (
               <button
@@ -388,15 +499,15 @@ export default function App() {
           <div className="context-stats">
             <div>
               <strong>{outline.length}</strong>
-              <span>Symbols</span>
+              <span>{tr("symbols")}</span>
             </div>
             <div>
               <strong>{importCount}</strong>
-              <span>Imports</span>
+              <span>{tr("imports")}</span>
             </div>
             <div>
               <strong>{workspace?.indexedFiles ?? 0}</strong>
-              <span>Indexed</span>
+              <span>{tr("indexed")}</span>
             </div>
           </div>
         </aside>
@@ -404,7 +515,7 @@ export default function App() {
 
       <footer className="statusbar">
         <span>{status}</span>
-        <span>Read-only · local-first · no telemetry</span>
+        <span>{tr("readOnly")}</span>
       </footer>
     </div>
   );
