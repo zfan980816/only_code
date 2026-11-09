@@ -42,6 +42,7 @@ const dict: Record<Locale, Record<string, string>> = {
     quickOpen: "快速打开…", noBookmark: "还没有书签",
     addBookmark: "加入书签", removeBookmark: "移除书签",
     refsFor: "引用结果", quickOpenHint: "输入文件名模糊搜索，Enter 打开",
+    focusMode: "专注模式",
   },
   en: {
     ready: "Ready", openFolder: "Open Folder", noWorkspace: "No workspace",
@@ -64,6 +65,7 @@ const dict: Record<Locale, Record<string, string>> = {
     quickOpen: "Quick Open…", noBookmark: "No bookmarks yet",
     addBookmark: "Add Bookmark", removeBookmark: "Remove Bookmark",
     refsFor: "References for", quickOpenHint: "Type to fuzzy-search files, Enter to open",
+    focusMode: "Focus Mode",
   },
 };
 
@@ -108,6 +110,7 @@ export default function App() {
   const [bookmarks, setBookmarks] = useState<string[]>(() => {
     try { return JSON.parse(localStorage.getItem(BOOKMARK_KEY) ?? "[]"); } catch { return []; }
   });
+  const [focusMode, setFocusMode] = useState(false);
   const [quickOpenOpen, setQuickOpenOpen] = useState(false);
   const [quickQuery, setQuickQuery] = useState("");
   const [quickResults, setQuickResults] = useState<string[]>([]);
@@ -152,6 +155,7 @@ export default function App() {
         setQuickSelected(0);
       }
       if (e.key === "Escape" && quickOpenOpen) setQuickOpenOpen(false);
+      if (e.key === "F" && e.shiftKey && (e.ctrlKey || e.metaKey)) { setFocusMode(v => !v); }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
@@ -256,7 +260,7 @@ export default function App() {
   const importCount = useMemo(() => outline.filter(s => s.kind === "import").length, [outline]);
 
   return (
-    <div className={`app-shell ${locale}`}>
+    <div className={`app-shell ${locale} ${focusMode ? "focus-mode" : ""}`}>
       <header className="app-header">
         <div className="brand"><span className="logo">LR</span><div><strong>Light Reader</strong><small>{tr("readOnly")}</small></div></div>
         <div className="workspace-details"><span>{workspace ? workspace.name : tr("noWorkspace")}</span>{workspace ? <small title={workspace.root}>{workspace.root}</small> : null}</div>
@@ -265,6 +269,7 @@ export default function App() {
             <button className={locale === "zh" ? "active" : ""} onClick={() => setLocale("zh")}>中文</button>
             <button className={locale === "en" ? "active" : ""} onClick={() => setLocale("en")}>EN</button>
           </div>
+          <button className={`focus-toggle ${focusMode ? "active" : ""}`} onClick={() => setFocusMode(v => !v)} title="Ctrl+Shift+F">{tr("focusMode")}</button>
           <button className="primary-button" onClick={openFolder}>{tr("openFolder")}</button>
         </div>
       </header>

@@ -289,3 +289,39 @@ button { cursor: pointer; }
 .bookmark-star.active { color:#f59e0b; }
 .bookmark-star:hover { background:var(--surface-2); }
 
+
+/* focus mode */
+.focus-mode .sidebar,
+.focus-mode .context-pane,
+.focus-mode .app-header,
+.focus-mode .statusbar {
+  display: none;
+}
+.focus-mode .workspace-layout {
+  grid-template-columns: 1fr !important;
+}
+.focus-mode .code-viewer {
+  grid-template-rows: 0 1fr;
+}
+.focus-mode .viewer-toolbar {
+  display: none;
+}
+.focus-mode .editor-host .cm-scroller {
+  padding: 48px max(10%, 48px);
+  font-size: 15px;
+  line-height: 1.7;
+}
+.focus-mode {
+  background: var(--surface);
+}
+
+/* focus toggle button */
+.focus-toggle {
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 12px; background: var(--surface);
+  color: var(--muted); font-size: 12px; cursor: pointer;
+}
+.focus-toggle.active {
+  border-color: var(--accent); color: var(--accent-strong);
+  background: rgba(14,165,233,.06);
+}
