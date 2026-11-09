@@ -183,22 +183,34 @@ export default function App() {
         localStorage.setItem(RECENT_KEY, JSON.stringify(n));
         return n;
       });
-    } catch (e) { setFileDocument(null); setOutline([]); setStatus(e instanceof Error ? e.message : String(e)); }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error("[LightReader] selectFile error:", msg);
+      setFileDocument(null); setOutline([]); setStatus(`Error: ${msg}`);
+    }
   }, [tr, workspace]);
 
   const openFolder = useCallback(async () => {
+    console.log("[LightReader] openFolder clicked, isTauri:", isTauri());
     if (!isTauri()) { setStatus(tr("nativeBackendRequired")); return; }
     try {
       setStatus(tr("openingWorkspace"));
+      console.log("[LightReader] calling dialog.open...");
       const sel = await open({ directory: true, multiple: false, title: tr("openFolder") });
+      console.log("[LightReader] dialog.open result:", sel);
       if (!sel) return;
       const ws = await backend.openWorkspace(sel);
+      console.log("[LightReader] workspace opened:", ws);
       setWorkspace(ws); setActivePath(null); setFileDocument(null); setOutline([]);
       setSearchResults([]); setSearchQuery(""); setBookmarks([]);
       await loadTree(ws.id);
       setStatus(`${ws.name} · ${ws.indexedFiles} ${tr("indexed")}`);
-    } catch (e) { setStatus(e instanceof Error ? e.message : String(e)); }
-  }, [loadTree, tr, bookmarks]);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error("[LightReader] openFolder error:", msg);
+      setStatus(`Error: ${msg}`);
+    }
+  }, [loadTree, tr]);
 
   useEffect(() => {
     if (!workspace) return;
