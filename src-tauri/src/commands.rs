@@ -150,8 +150,11 @@ pub fn file_tree(workspace_id: String, path: Option<String>) -> Result<Vec<TreeN
 
 #[tauri::command]
 pub fn file_read(workspace_id: String, path: String) -> Result<FileDocument, String> {
+    println!("[file_read] workspace_id={}, path={}", workspace_id, path);
     let root = workspace_root(&workspace_id)?;
+    println!("[file_read] root={:?}", root);
     let target = safe_relative_path(&root, &path)?;
+    println!("[file_read] resolved target={:?}", target);
     let metadata = std::fs::metadata(&target)
         .map_err(|e| format!("cannot read file metadata: {e}"))?;
     if !metadata.is_file() {

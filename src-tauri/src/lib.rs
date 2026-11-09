@@ -1,12 +1,12 @@
-mod commands;
-mod db;
-mod fs_util;
-mod indexer;
-mod language;
-mod models;
-mod search;
-mod state;
-mod symbols;
+pub mod commands;
+pub mod db;
+pub mod fs_util;
+pub mod indexer;
+pub mod language;
+pub mod models;
+pub mod search;
+pub mod state;
+pub mod symbols;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -27,5 +27,6 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running Light Reader");
 }
+
 
 
