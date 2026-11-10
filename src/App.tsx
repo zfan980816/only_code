@@ -482,39 +482,88 @@ export default function App() {
 
 
 
-  // Code folding: lines with higher indent than next non-empty line are foldable
-  const foldableLines = useMemo(() => {
-    if (!doc) return new Set<number>();
+  // Code folding: combines bracket-balanced folding (for multi-line calls/blocks) with
+  // indentation-based folding (for def/class/if/for etc). A foldable line gets a gutter
+  // arrow; folding it hides all lines until the matching close bracket or dedent.
+  const foldInfo = useMemo(() => {
+    const empty = { foldable: new Set<number>(), ranges: new Map<number, number>() };
+    if (!doc) return empty;
     const lines = doc.content.split("\n");
-    const set = new Set<number>();
+    const foldable = new Set<number>();
+    const ranges = new Map<number, number>(); // start line -> end line (inclusive)
+
+    // Pass 1: bracket-based folding. Track (), [], {} depth across lines,
+    // skipping strings and comments so brackets inside them don't affect the count.
+    let depth = 0;
+    const stack: Array<{ line: number; depthBefore: number }> = [];
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      let delta = 0;
+      let inStr: string | null = null;
+      for (let j = 0; j < line.length; j++) {
+        const ch = line[j];
+        if (inStr) {
+          if (ch === inStr && line[j - 1] !== "\\") inStr = null;
+        } else if (ch === '"' || ch === "'" || ch === "`") {
+          inStr = ch;
+        } else if (ch === "#") {
+          break; // rest of line is a comment
+        } else if (ch === "(" || ch === "[" || ch === "{") {
+          delta++;
+        } else if (ch === ")" || ch === "]" || ch === "}") {
+          delta--;
+        }
+      }
+      const depthBefore = depth;
+      depth += delta;
+      if (depth > depthBefore) stack.push({ line: i, depthBefore });
+      while (stack.length > 0 && depth <= stack[stack.length - 1].depthBefore) {
+        const start = stack.pop()!.line;
+        foldable.add(start);
+        ranges.set(start, i);
+      }
+    }
+
+    // Pass 2: indentation-based folding for blocks like def/if/for/class.
+    // Skip lines already covered by bracket folds to avoid double-marking.
     for (let i = 0; i < lines.length - 1; i++) {
+      if (foldable.has(i)) continue;
       const cur = lines[i];
       const next = lines[i + 1] ?? "";
       if (!cur.trim()) continue;
       const curIndent = cur.length - cur.trimStart().length;
       const nextIndent = next.length - next.trimStart().length;
-      if (next.trim() && nextIndent > curIndent) set.add(i);
+      if (next.trim() && nextIndent > curIndent) {
+        // Extend to the last consecutive line with deeper indentation
+        let end = i;
+        for (let j = i + 1; j < lines.length; j++) {
+          const line = lines[j];
+          if (!line.trim()) { end = j; continue; }
+          const indent = line.length - line.trimStart().length;
+          if (indent <= curIndent) break;
+          end = j;
+        }
+        if (end > i) {
+          foldable.add(i);
+          ranges.set(i, end);
+        }
+      }
     }
-    return set;
+
+    return { foldable, ranges };
   }, [doc]);
 
   // Which lines are hidden because their fold-parent is collapsed
   const hiddenLines = useMemo(() => {
     if (!doc || foldedLines.size === 0) return new Set<number>();
-    const lines = doc.content.split("\n");
     const hidden = new Set<number>();
     for (const start of foldedLines) {
-      const curIndent = lines[start].length - lines[start].trimStart().length;
-      let j = start + 1;
-      while (j < lines.length) {
-        const line = lines[j];
-        if (line.trim() && (line.length - line.trimStart().length) <= curIndent) break;
-        hidden.add(j);
-        j++;
-      }
+      const end = foldInfo.ranges.get(start);
+      if (end === undefined) continue;
+      for (let j = start + 1; j <= end; j++) hidden.add(j);
     }
     return hidden;
-  }, [doc, foldedLines]);
+  }, [doc, foldedLines, foldInfo]);
 
   const toggleFold = useCallback((lineIdx: number) => {
     setFoldedLines(prev => {
@@ -665,7 +714,7 @@ export default function App() {
               <pre ref={codeRef} className="code">
                 {codeLines.map((line, i) => {
                   if (hiddenLines.has(i)) return null;
-                  const isFoldable = foldableLines.has(i);
+                  const isFoldable = foldInfo.foldable.has(i);
                   const isFolded = foldedLines.has(i);
                   const lineClasses = [
                     "code-line",
@@ -817,6 +866,7 @@ export default function App() {
     </div>
   );
 }
+
 
 
 
