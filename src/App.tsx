@@ -800,6 +800,52 @@ export default function App() {
                     }
                     return tk.cls ? <span key={j} className={tk.cls}>{tk.text}</span> : <span key={j}>{tk.text}</span>;
                   };
+                  // IDEA fold: truncate line at the fold-opening bracket, show … placeholder
+                  let foldBracketPos = -1;
+                  
+                  if (isFolded && isFoldable) {
+                    let d = 0, inStr: string | null = null;
+                    for (let j = 0; j < line.raw.length; j++) {
+                      const ch = line.raw[j];
+                      if (inStr) { if (ch === inStr && line.raw[j-1] !== "\\") inStr = null; }
+                      else if (ch === '"' || ch === "'" || ch === "`") inStr = ch;
+                      else if (ch === "#") break;
+                      else if (ch === "(" || ch === "[" || ch === "{") { d++; foldBracketPos = j;  }
+                      else if (ch === ")" || ch === "]" || ch === "}") d--;
+                    }
+                  }
+                  const placeholder = "…";
+                  // Filter tokens: keep only text before the fold bracket
+                  let charCursor = 0;
+                  const visibleTokens: { text: string; cls: string }[] = [];
+                  if (isFolded && isFoldable && foldBracketPos >= 0) {
+                    for (const tk of line.tokens) {
+                      const tkStart = charCursor;
+                      const tkEnd = charCursor + tk.text.length;
+                      charCursor = tkEnd;
+                      if (tkEnd <= foldBracketPos + 1) { visibleTokens.push(tk); }
+                      else if (tkStart < foldBracketPos + 1) {
+                        visibleTokens.push({ text: tk.text.slice(0, foldBracketPos + 1 - tkStart), cls: tk.cls });
+                        break;
+                      }
+                    }
+                  }
+                  const renderVisible = (tk: { text: string; cls: string }, j: number) => {
+                    if (highlightWord && tk.text.includes(highlightWord)) {
+                      const parts = tk.text.split(highlightWord);
+                      return (
+                        <span key={j} className={tk.cls || undefined}>
+                          {parts.map((part, pi) => (
+                            <span key={pi}>
+                              {part}
+                              {pi < parts.length - 1 && <span className="sym-hl">{highlightWord}</span>}
+                            </span>
+                          ))}
+                        </span>
+                      );
+                    }
+                    return tk.cls ? <span key={j} className={tk.cls}>{tk.text}</span> : <span key={j}>{tk.text}</span>;
+                  };
                   return (
                     <div key={i} className={lineClasses}
                       onClick={(e) => handleCodeClick(e, i)}>
@@ -809,11 +855,11 @@ export default function App() {
                         {isFoldable ? (isFolded ? "▸" : "▾") : ""}
                       </span>
                       <span className="code-text">
-                        {line.tokens.map(renderToken)}
-                        {isFolded && isFoldable && (
+                        {(isFolded && isFoldable && foldBracketPos >= 0 ? visibleTokens : line.tokens).map(isFolded && isFoldable ? renderVisible : renderToken)}
+                        {isFolded && isFoldable && foldBracketPos >= 0 && (
                           <span className="fold-placeholder"
                             onClick={(e) => { e.stopPropagation(); toggleFold(i); }}
-                            title="Click to expand">{line.raw.trimEnd().endsWith("(") ? "...)" : line.raw.trimEnd().endsWith("{") ? "{...}" : "..."}</span>
+                            title="Click to expand">{placeholder}</span>
                         )}
                       </span>
                     </div>
@@ -925,6 +971,10 @@ export default function App() {
     </div>
   );
 }
+
+
+
+
 
 
 

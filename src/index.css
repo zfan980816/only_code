@@ -565,9 +565,11 @@ html, body, #root { height: 100vh; overflow: hidden; }
   user-select: none;
   line-height: 1.7;
 }
-.fold-gutter.foldable { color: var(--muted); cursor: pointer; }
+/* IDEA rule: folding icons show up on hover only */
+.code-line:hover .fold-gutter.foldable { color: var(--muted); cursor: pointer; }
 .fold-gutter.foldable:hover { color: var(--accent); }
 .fold-gutter.folded { color: var(--accent); }
+.code-line:hover .fold-gutter.folded { color: var(--accent); cursor: pointer; }
 
 /* ── Current line ── */
 .code-line.current-line { background: rgba(232,93,61,.05); }
@@ -595,24 +597,21 @@ html, body, #root { height: 100vh; overflow: hidden; }
 .outline-arrow:not(.open):not(:empty):hover { color: var(--accent); }
 
 
-/* ── Fold placeholder ({...} when collapsed, IDEA style) ── */
+/* ── Fold placeholder: IDEA "shaded ellipses" ── */
 .fold-placeholder {
-  display: inline-block;
-  margin-left: 4px;
-  padding: 0 5px;
-  border-radius: 3px;
+  margin-left: 0;
+  padding: 0 3px;
+  border-radius: 2px;
   background: var(--surface-2);
-  border: 1px solid var(--border);
-  color: var(--muted);
-  font-size: 11px;
-  font-style: italic;
+  color: var(--text-secondary);
+  font-size: inherit;
   cursor: pointer;
   user-select: none;
   transition: all 0.1s ease;
-  line-height: 1.5;
 }
 .fold-placeholder:hover {
   background: var(--accent-light);
-  border-color: var(--accent);
   color: var(--accent);
 }
+
+
