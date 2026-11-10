@@ -816,8 +816,6 @@ export default function App() {
   return (
     <div className={`app ${focus ? "focus" : ""}`}>
       <header className="hdr">
-        <span className="logo">LR</span>
-        <span />
         <button className="btn-focus" onClick={() => setFocus(!focus)}>{t("focus")}</button>
         <button className="btn-lang" onClick={() => setLang(lang === "zh" ? "en" : "zh")}>{lang === "zh" ? "EN" : "中文"}</button>
         <button className="btn-open" onClick={openFolder}>{t("open")}</button>
@@ -1168,6 +1166,7 @@ export default function App() {
     </div>
   );
 }
+
 
 
 

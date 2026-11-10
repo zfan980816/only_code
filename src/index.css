@@ -44,9 +44,9 @@ html, body, #root { height: 100vh; overflow: hidden; }
 
 /* ── Header ── */
 .hdr {
-  display: flex; align-items: center; gap: 12px;
-  padding: 12px 16px 10px;
-  background: #F0F0EE;
+  display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+  padding: 10px 16px;
+  background: transparent;
   border-bottom: none;
   flex-shrink: 0;
 }
@@ -813,3 +813,4 @@ html, body, #root { height: 100vh; overflow: hidden; }
 .folder-item.on .folder-ic { color: var(--accent); }
 .folder-files { padding: 0 0 4px 14px; }
 .folder-files .tree-row { font-size: 12.5px; padding: 4px 9px; }
+
