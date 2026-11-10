@@ -175,6 +175,7 @@ export default function App() {
   const [highlightWord, setHighlightWord] = useState("");
   const [foldedLines, setFoldedLines] = useState<Set<number>>(new Set());
   const [outlineOpen, setOutlineOpen] = useState<Set<string>>(new Set());
+  const [outlineFilter, setOutlineFilter] = useState("");
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportH, setViewportH] = useState(600);
   const [jumpTarget, setJumpTarget] = useState<{path:string; line:number} | null>(null);
@@ -698,6 +699,21 @@ export default function App() {
   ));
 
   const symTree = useMemo(() => buildSymTree(syms), [syms]);
+  const filteredSymTree = useMemo(() => {
+    if (!outlineFilter.trim()) return symTree;
+    const q = outlineFilter.toLowerCase();
+    const filterNodes = (nodes: SymNode[]): SymNode[] => {
+      const result: SymNode[] = [];
+      for (const n of nodes) {
+        const children = filterNodes(n.children);
+        if (n.sym.name.toLowerCase().includes(q) || children.length > 0) {
+          result.push({ ...n, children });
+        }
+      }
+      return result;
+    };
+    return filterNodes(symTree);
+  }, [symTree, outlineFilter]);
   
   // Auto-expand all outline nodes when a new file is loaded
   useEffect(() => {
@@ -838,6 +854,7 @@ export default function App() {
                   <button className={`opt ${searchWhole?"on":""}`} onClick={()=>{ const v=!searchWhole; setSearchWhole(v); doSearch(searchQ,{caseSensitive:searchCase,regex:searchRegex,wholeWord:v,pathFilter:searchPath}); }} title="Whole word">W</button>
                   <input className="opt-path" value={searchPath} placeholder="path filter…" onChange={e=>{ setSearchPath(e.target.value); doSearch(searchQ,{caseSensitive:searchCase,regex:searchRegex,wholeWord:searchWhole,pathFilter:e.target.value}); }} />
                 </div>
+                <div className="search-count">{results.reduce((acc,r) => acc + r.matches.length, 0)} matches in {results.length} files</div>
                 <div className="results">
                   {results.map(r => (
                     <div key={r.path} className="result-file">
@@ -1012,8 +1029,10 @@ export default function App() {
           <aside className="right" style={{ width: rightWidth, minWidth: 160, maxWidth: 500 }}>
             <div className="panel">
               <h4>{t("outline")}</h4>
+              <input className="outline-filter" value={outlineFilter} placeholder="filter symbols…"
+                onChange={e => setOutlineFilter(e.target.value)} />
               {syms.length===0 ? <span className="muted">{t("noSyms")}</span> :
-                symTree.map(n => renderOutlineSym(n, 0))}
+                filteredSymTree.map(n => renderOutlineSym(n, 0))}
               {syms.length>0 && <button className="find-refs-btn" onClick={() => syms[0] && findRefs(syms[0].name)}>{t("findRefs")} →</button>}
             </div>
             {refs.length > 0 && (
@@ -1107,6 +1126,7 @@ export default function App() {
     </div>
   );
 }
+
 
 
 

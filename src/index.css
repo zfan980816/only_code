@@ -651,3 +651,24 @@ html, body, #root { height: 100vh; overflow: hidden; }
 /* ── Virtual scrolling ── */
 .code { contain: strict; }
 .code .code-line { height: 22px; line-height: 22px; }
+
+
+/* ── Outline filter ── */
+.outline-filter {
+  width: calc(100% - 16px); margin: 0 8px 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 11px;
+  outline: none;
+}
+.outline-filter:focus { border-color: var(--accent); background: var(--surface); }
+
+/* ── Search result count ── */
+.search-count {
+  padding: 2px 10px 6px;
+  font-size: 10px;
+  color: var(--muted);
+}
