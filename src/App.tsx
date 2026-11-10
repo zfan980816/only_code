@@ -546,11 +546,35 @@ export default function App() {
     // Pass 2: indentation-based folding for blocks like def/if/for/class.
     // Skip lines already covered by bracket folds to avoid double-marking.
     for (let i = 0; i < lines.length - 1; i++) {
-      if (foldable.has(i)) continue;
       const cur = lines[i];
-      const next = lines[i + 1] ?? "";
       if (!cur.trim()) continue;
       const curIndent = cur.length - cur.trimStart().length;
+      const trimmed = cur.trim();
+      const isDefOrClass = trimmed.startsWith("def ") || trimmed.startsWith("class ") || trimmed.startsWith("async def ");
+
+      if (isDefOrClass) {
+        // Whole-method fold: cover from def line all the way to end of body (indentation).
+        // Start scanning after any bracket-fold range (multi-line params) so the body
+        // after the closing paren is included in the same fold region.
+        let bodyStart = i + 1;
+        if (ranges.has(i)) bodyStart = Math.max(bodyStart, ranges.get(i)! + 1);
+        let end = i;
+        for (let j = bodyStart; j < lines.length; j++) {
+          const line = lines[j];
+          if (!line.trim()) { end = j; continue; }
+          const indent = line.length - line.trimStart().length;
+          if (indent <= curIndent) break;
+          end = j;
+        }
+        if (end > i) {
+          foldable.add(i);
+          ranges.set(i, end); // override bracket fold with whole-method fold
+        }
+        continue;
+      }
+
+      if (foldable.has(i)) continue;
+      const next = lines[i + 1] ?? "";
       const nextIndent = next.length - next.trimStart().length;
       if (next.trim() && nextIndent > curIndent) {
         // Extend to the last consecutive line with deeper indentation
@@ -820,9 +844,9 @@ export default function App() {
                       const tkStart = charCursor;
                       const tkEnd = charCursor + tk.text.length;
                       charCursor = tkEnd;
-                      if (tkEnd <= foldBracketPos + 1) { visibleTokens.push(tk); }
-                      else if (tkStart < foldBracketPos + 1) {
-                        visibleTokens.push({ text: tk.text.slice(0, foldBracketPos + 1 - tkStart), cls: tk.cls });
+                      if (tkEnd <= foldBracketPos) { visibleTokens.push(tk); }
+                      else if (tkStart < foldBracketPos) {
+                        visibleTokens.push({ text: tk.text.slice(0, foldBracketPos - tkStart), cls: tk.cls });
                         break;
                       }
                     }
@@ -968,6 +992,7 @@ export default function App() {
     </div>
   );
 }
+
 
 
 
