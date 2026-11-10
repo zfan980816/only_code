@@ -815,11 +815,8 @@ export default function App() {
 
   return (
     <div className={`app ${focus ? "focus" : ""}`}>
-      <header className="hdr">
-        <button className="btn-focus" onClick={() => setFocus(!focus)}>{t("focus")}</button>
-        <button className="btn-lang" onClick={() => setLang(lang === "zh" ? "en" : "zh")}>{lang === "zh" ? "EN" : "中文"}</button>
-        <button className="btn-open" onClick={openFolder}>{t("open")}</button>
-      </header>
+
+
       {err && <div className="err-bar">⚠ {err}</div>}
 
       {quickOpen && (
@@ -852,10 +849,18 @@ export default function App() {
                 <span className="lr-logo">LR</span>
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
               </button>
-              <button className="icon-btn" onClick={() => setSearchModalOpen(true)} title="全局搜索">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-              </button>
+              <div className="side-actions">
+                <button className="icon-btn txt" onClick={() => setLang(lang === "zh" ? "en" : "zh")} title="Language">{lang === "zh" ? "EN" : "中"}</button>
+
+                <button className="icon-btn" onClick={() => setSearchModalOpen(true)} title="全局搜索">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                </button>
+              </div>
             </div>
+            <button className="side-open-btn" onClick={openFolder}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
+              打开文件夹
+            </button>
             {wsMenuOpen && (
               <>
                 <div className="ws-menu-overlay" onClick={() => setWsMenuOpen(false)} />
@@ -881,11 +886,7 @@ export default function App() {
                         <svg className="folder-ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
                         <span>{w.name}</span>
                       </button>
-                      {active && expanded[""] && (
-                        <div className="folder-files">
-                          {expanded[""].map(c => renderTree([c], 0))}
-                        </div>
-                      )}
+
                     </div>
                   );
                 })}
@@ -893,6 +894,14 @@ export default function App() {
                   <div className="muted" style={{ padding: "8px 12px", fontSize: 12.5 }}>点上方"打开文件夹"导入</div>
                 )}
               </div>
+              {ws && expanded[""] && (
+                <>
+                  <div className="side-section-title">浏览</div>
+                  <div className="tree">
+                    {expanded[""].map(c => renderTree([c], 0))}
+                  </div>
+                </>
+              )}
           </aside>
         )}
 
@@ -1166,6 +1175,8 @@ export default function App() {
     </div>
   );
 }
+
+
 
 
 
