@@ -29,6 +29,8 @@ const KW: Record<string, string[]> = {
 };
 
 let _inMultiLine = false;
+const LINE_H = 22; // px, must match .code line-height
+const OVERSCAN = 20; // extra lines rendered above/below viewport
 
 function hl(line: string, lang: string): { text: string; cls: string }[] {
   const r: { text: string; cls: string }[] = [];
@@ -173,6 +175,8 @@ export default function App() {
   const [highlightWord, setHighlightWord] = useState("");
   const [foldedLines, setFoldedLines] = useState<Set<number>>(new Set());
   const [outlineOpen, setOutlineOpen] = useState<Set<string>>(new Set());
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportH, setViewportH] = useState(600);
   const [jumpTarget, setJumpTarget] = useState<{path:string; line:number} | null>(null);
   const [leftWidth, setLeftWidth] = useState(260);
   const [rightWidth, setRightWidth] = useState(230);
@@ -536,41 +540,6 @@ export default function App() {
     return matches;
   }, [doc, fileSearch]);
 
-  const goMatch = useCallback((dir: number) => {
-    if (matchLines.length === 0) return;
-    let next = matchIdx + dir;
-    if (next < 0) next = matchLines.length - 1;
-    if (next >= matchLines.length) next = 0;
-    setMatchIdx(next);
-    // Scroll to the matching line
-    const targetLine = matchLines[next];
-    const codeEl = codeRef.current;
-    if (codeEl) {
-      const lineEl = codeEl.querySelector(`.code-line:nth-child(${targetLine + 1})`);
-      if (lineEl) lineEl.scrollIntoView({ behavior: "smooth", block: "center" });
-    }
-  }, [matchIdx, matchLines]);
-
-    // Scroll to jump target when doc changes
-  useEffect(() => {
-    console.log("[scrollEffect] jumpTarget:", jumpTarget, "doc:", !!doc, "activePath:", activeTabData?.path);
-    if (!jumpTarget || !doc || !codeRef.current) return;
-    if (jumpTarget.path !== activeTabData?.path) { console.log("[scrollEffect] path mismatch"); return; }
-    const timer = setTimeout(() => {
-      const codeEl = codeRef.current;
-      if (!codeEl) return;
-      const allLines = codeEl.querySelectorAll(".code-line");
-      console.log("[scrollEffect] total lines:", allLines.length, "target:", jumpTarget.line);
-      if (jumpTarget.line <= allLines.length) {
-        const lineEl = allLines[jumpTarget.line - 1];
-        if (lineEl) {
-          lineEl.scrollIntoView({ behavior: "smooth", block: "center" });
-          console.log("[scrollEffect] scrolled to line", jumpTarget.line);
-        }
-      }
-    }, 200);
-    return () => clearTimeout(timer);
-  }, [doc, jumpTarget, activeTabData]);
 
 
 
@@ -742,6 +711,63 @@ export default function App() {
     if (!doc) return [];
     return doc.content.split("\n").map(line => ({ raw: line, tokens: hl(line, doc.language) }));
   }, [doc]);
+  // Virtual scrolling: only render lines near the viewport for large files
+  const isLargeFile = codeLines.length > 300;
+  const visibleRange = useMemo(() => {
+    if (!isLargeFile) return { start: 0, end: codeLines.length };
+    const start = Math.max(0, Math.floor(scrollTop / LINE_H) - OVERSCAN);
+    const visibleCount = Math.ceil(viewportH / LINE_H) + OVERSCAN * 2;
+    const end = Math.min(codeLines.length, start + visibleCount);
+    return { start, end };
+  }, [isLargeFile, scrollTop, viewportH, codeLines.length]);
+
+  const onCodeScroll = useCallback((e: React.UIEvent<HTMLPreElement>) => {
+    const el = e.currentTarget;
+    setScrollTop(el.scrollTop);
+    setViewportH(el.clientHeight || 600);
+
+    // Scroll to jump target when doc changes
+  useEffect(() => {
+    console.log("[scrollEffect] jumpTarget:", jumpTarget, "doc:", !!doc, "activePath:", activeTabData?.path);
+    if (!jumpTarget || !doc || !codeRef.current) return;
+    if (jumpTarget.path !== activeTabData?.path) { console.log("[scrollEffect] path mismatch"); return; }
+    const timer = setTimeout(() => {
+      const codeEl = codeRef.current;
+      if (!codeEl) return;
+      if (codeLines.length > 300) {
+        // Virtual scrolling: compute offset directly since the line may not be in the DOM
+        codeEl.scrollTop = Math.max(0, (jumpTarget.line - 1) * LINE_H - codeEl.clientHeight / 2);
+      } else {
+        const allLines = codeEl.querySelectorAll(".code-line");
+        if (jumpTarget.line <= allLines.length) {
+          const lineEl = allLines[jumpTarget.line - 1];
+          if (lineEl) {
+            lineEl.scrollIntoView({ behavior: "smooth", block: "center" });
+          }
+        }
+      }
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [doc, jumpTarget, activeTabData, codeLines]);
+  }, []);
+  const goMatch = useCallback((dir: number) => {
+    if (matchLines.length === 0) return;
+    let next = matchIdx + dir;
+    if (next < 0) next = matchLines.length - 1;
+    if (next >= matchLines.length) next = 0;
+    setMatchIdx(next);
+    // Scroll to the matching line
+    const targetLine = matchLines[next];
+    const codeEl = codeRef.current;
+    if (codeEl) {
+      if (isLargeFile) {
+        codeEl.scrollTop = Math.max(0, targetLine * LINE_H - codeEl.clientHeight / 2);
+      } else {
+        const lineEl = codeEl.querySelector(`.code-line:nth-child(${targetLine + 1})`);
+        if (lineEl) lineEl.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    }
+  }, [matchIdx, matchLines, isLargeFile]);
 
   return (
     <div className={`app ${focus ? "focus" : ""}`}>
@@ -878,8 +904,10 @@ export default function App() {
                   <button className="btn-mini" onClick={() => { setFileSearchVisible(false); setFileSearch(""); setMatchIdx(0); }}>✕</button>
                 </div>
               )}
-              <pre ref={codeRef} className="code">
-                {codeLines.map((line, i) => {
+              <pre ref={codeRef} className="code" onScroll={onCodeScroll}>
+                {isLargeFile && visibleRange.start > 0 && <div style={{ height: visibleRange.start * LINE_H }} />}
+                {codeLines.slice(visibleRange.start, visibleRange.end).map((line, idx) => {
+                  const i = visibleRange.start + idx;
                   if (hiddenLines.has(i)) return null;
                   const isFoldable = foldInfo.foldable.has(i);
                   const isFolded = foldedLines.has(i);
@@ -972,6 +1000,7 @@ export default function App() {
                     </div>
                   );
                 })}
+                {isLargeFile && visibleRange.end < codeLines.length && <div style={{ height: (codeLines.length - visibleRange.end) * LINE_H }} />}
               </pre>
             </>
           ) : <div className="no-file">{t("noFile")}</div>}
@@ -1078,6 +1107,9 @@ export default function App() {
     </div>
   );
 }
+
+
+
 
 
 

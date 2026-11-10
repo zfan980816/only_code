@@ -646,3 +646,8 @@ html, body, #root { height: 100vh; overflow: hidden; }
 }
 .ws-row:hover .ws-remove { opacity: 1; }
 .ws-remove:hover { color: var(--err); }
+
+
+/* ── Virtual scrolling ── */
+.code { contain: strict; }
+.code .code-line { height: 22px; line-height: 22px; }
