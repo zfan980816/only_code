@@ -135,7 +135,7 @@ export default function App() {
   const [lang, setLang] = useState<Lang>("zh");
   const t = (k: string) => (L[lang] as Record<string,string>)[k] ?? k;
   const [ws, setWs] = useState<Ws | null>(null);
-  const [tree, setTree] = useState<N[]>([]);
+  const [, setTree] = useState<N[]>([]);
   const [expanded, setExpanded] = useState<Record<string, N[]>>({});
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeTab, setActiveTab] = useState(0);
@@ -148,14 +148,11 @@ export default function App() {
   const [matchIdx, setMatchIdx] = useState(0);
   const [matchLines, setMatchLines] = useState<number[]>([]);
   const codeRef = useRef<HTMLPreElement>(null);
+  const [searchModalOpen, setSearchModalOpen] = useState(false);
+  const [wsMenuOpen, setWsMenuOpen] = useState(false);
   const [searchQ, setSearchQ] = useState("");
   const [results, setResults] = useState<SRes["results"]>([]);
-  const [searchCase, setSearchCase] = useState(false);
-  const [searchRegex, setSearchRegex] = useState(false);
-  const [searchWhole, setSearchWhole] = useState(false);
-  const [searchPath, setSearchPath] = useState("");
   const [focus, setFocus] = useState(false);
-  const [tabView, setTabView] = useState<"files"|"search"|"bookmarks">("files");
   const [err, setErr] = useState<string | null>(null);
   const [bookmarks, setBookmarks] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem("lr-bm") ?? "[]"); } catch { return []; } });
   const [wsList, setWsList] = useState<Array<{root:string;name:string}>>(() => { try { return JSON.parse(localStorage.getItem("lr-ws-list") ?? "[]"); } catch { return []; } });
@@ -224,7 +221,7 @@ export default function App() {
       if (e.ctrlKey && e.key === "f" && !e.shiftKey) { e.preventDefault(); setFileSearchVisible(true); setTimeout(() => fileSearchRef.current?.focus(), 50); }
       if (e.ctrlKey && e.shiftKey && e.key === "N") { e.preventDefault(); setSymOpen(true); setSymQ(""); setSymResults([]); setSymIdx(0); }
       if (e.ctrlKey && e.shiftKey && e.key === "F") { e.preventDefault(); setFocus(v=>!v); }
-      if (e.key === "Escape") { setQuickOpen(false); setFileSearchVisible(false); setFileSearch(""); setMatchIdx(0); setRefPopup(null); setSymOpen(false); }
+      if (e.key === "Escape") { setQuickOpen(false); setFileSearchVisible(false); setFileSearch(""); setMatchIdx(0); setRefPopup(null); setSymOpen(false); setSearchModalOpen(false); setWsMenuOpen(false); }
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
@@ -263,6 +260,7 @@ export default function App() {
     }, 100);
     return () => clearTimeout(timer);
   }, [symQ, symOpen, ws]);
+  
 
   // Tauri events: streaming search results + file change refresh + index progress
   useEffect(() => {
@@ -309,10 +307,12 @@ export default function App() {
       const w = await call<Ws>("workspace_open", { root });
       setWs(w); setTabs([]); setActiveTab(0); setDoc(null); setSyms([]); setResults([]); setSearchQ(""); setRefs([]); setDefs([]);
       setTree([{ name: w.name, path: "", isDir: true }]); setExpanded({});
+      try { const ch = await call<N[]>("file_tree", { workspaceId: w.id }); setExpanded({ "": ch }); } catch {}
       setFoldedLines(new Set()); setHighlightWord(""); setCurrentLine(0); setJumpTarget(null);
       setStatus(`${w.name} · ${w.indexedFiles} indexed`);
       setWsList(prev => {
-        const next = [{ root, name: w.name }, ...prev.filter(x => x.root !== root)];
+        const norm = (p: string) => p.replace(/^\\\\\?\\\\/, "").replace(/\/$/, "").toLowerCase();
+        const next = [{ root, name: w.name }, ...prev.filter(x => norm(x.root) !== norm(root) && x.name !== w.name)];
         localStorage.setItem("lr-ws-list", JSON.stringify(next));
         return next;
       });
@@ -440,15 +440,22 @@ export default function App() {
     });
   }, [activeTab, switchTab]);
 
-  const doSearch = useCallback(async (q: string, opts?: { caseSensitive?: boolean; regex?: boolean; wholeWord?: boolean; pathFilter?: string }) => {
+
+  const doSearch = useCallback(async (q: string) => {
     if (!ws || !q.trim()) { setResults([]); return; }
     try {
-      setResults([]);
-      const r = await call<SRes>("search", { workspaceId: ws.id, query: q.trim(), options: { caseSensitive: opts?.caseSensitive ?? false, regex: opts?.regex ?? false, wholeWord: opts?.wholeWord ?? false, pathFilter: opts?.pathFilter || undefined, maxResults: 500 } });
+      const r = await call<SRes>("search", { workspaceId: ws.id, query: q.trim(), options: { caseSensitive: false, regex: false, wholeWord: false, maxResults: 300 } });
       setResults(r.results);
     } catch (e) { setStatus(`ERR: ${e}`); }
   }, [ws]);
 
+  // Global search (modal) debounce
+  useEffect(() => {
+    if (!searchModalOpen || !ws || !searchQ.trim()) return;
+    const timer = setTimeout(() => doSearch(searchQ), 250);
+    return () => clearTimeout(timer);
+  }, [searchQ, searchModalOpen, ws, doSearch]);
+  
   const findRefs = useCallback(async (name: string) => {
     if (!ws || !name.trim()) return;
     setRefTarget(name);
@@ -839,65 +846,36 @@ export default function App() {
       <main className="layout">
         {!focus && (
           <aside className="left" style={{ width: leftWidth, minWidth: 160, maxWidth: 500 }}>
-            <div className="tabs">
-              <button className={tabView==="files"?"on":""} onClick={()=>setTabView("files")}>{t("files")}</button>
-              <button className={tabView==="search"?"on":""} onClick={()=>setTabView("search")}>{t("search")}</button>
-              <button className={tabView==="bookmarks"?"on":""} onClick={()=>setTabView("bookmarks")}>{t("bookmarks")} ({bookmarks.length})</button>
+            <div className="side-top">
+              <button className="ws-switcher" onClick={() => setWsMenuOpen(v => !v)} title="切换工作区">
+                <span className="lr-logo">LR</span>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+              </button>
+              <button className="icon-btn" onClick={() => setSearchModalOpen(true)} title="全局搜索">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              </button>
             </div>
-            {tabView==="files" && (
+            {wsMenuOpen && (
+              <>
+                <div className="ws-menu-overlay" onClick={() => setWsMenuOpen(false)} />
+                <div className="ws-menu">
+                  {wsList.map(w => (
+                    <div key={w.root} className={`ws-menu-row ${ws?.root === w.root ? "on" : ""}`}>
+                      <button className="ws-menu-item" onClick={() => { setWsMenuOpen(false); openWorkspace(w.root); }}>{w.name}</button>
+                      <button className="ws-menu-remove" title="移除" onClick={(e) => { e.stopPropagation(); removeWorkspace(w.root); }}>×</button>
+                    </div>
+                  ))}
+                  <div className="ws-menu-divider" />
+                  <button className="ws-menu-item" onClick={() => { setWsMenuOpen(false); openFolder(); }}>打开文件夹…</button>
+                </div>
+              </>
+            )}
+              <div className="side-section-title">文件</div>
               <div className="tree">
-                {wsList.length > 0 && (
-                  <div className="ws-list">
-                    <div className="ws-list-title">{t("workspaces")}</div>
-                    {wsList.map(w => (
-                      <div key={w.root} className={`ws-row ${ws?.root === w.root ? "on" : ""}`}>
-                        <button className="ws-open" onClick={() => openWorkspace(w.root)}>
-                          <span className="ws-icon">▸</span>{w.name}
-                        </button>
-                        <button className="ws-remove" onClick={(e) => { e.stopPropagation(); removeWorkspace(w.root); }} title="移除">×</button>
-                      </div>
-                    ))}
-                  </div>
+                {ws && expanded[""] ? expanded[""].map(c => renderTree([c], 0)) : (
+                  <div className="muted" style={{ padding: "10px 12px", fontSize: 12.5 }}>打开一个文件夹开始阅读</div>
                 )}
-                {renderTree(tree,0)}
               </div>
-            )}
-            {tabView==="search" && (
-              <div className="search-wrap">
-                <input className="search-input" value={searchQ} placeholder="Search..."
-                  onChange={e => { setSearchQ(e.target.value); doSearch(e.target.value, { caseSensitive:searchCase, regex:searchRegex, wholeWord:searchWhole, pathFilter:searchPath }); }} />
-                <div className="search-opts">
-                  <button className={`opt ${searchCase?"on":""}`} onClick={()=>{ const v=!searchCase; setSearchCase(v); doSearch(searchQ,{caseSensitive:v,regex:searchRegex,wholeWord:searchWhole,pathFilter:searchPath}); }} title="Case sensitive">Aa</button>
-                  <button className={`opt ${searchRegex?"on":""}`} onClick={()=>{ const v=!searchRegex; setSearchRegex(v); doSearch(searchQ,{caseSensitive:searchCase,regex:v,wholeWord:searchWhole,pathFilter:searchPath}); }} title="Regex">.*</button>
-                  <button className={`opt ${searchWhole?"on":""}`} onClick={()=>{ const v=!searchWhole; setSearchWhole(v); doSearch(searchQ,{caseSensitive:searchCase,regex:searchRegex,wholeWord:v,pathFilter:searchPath}); }} title="Whole word">W</button>
-                  <input className="opt-path" value={searchPath} placeholder="path filter…" onChange={e=>{ setSearchPath(e.target.value); doSearch(searchQ,{caseSensitive:searchCase,regex:searchRegex,wholeWord:searchWhole,pathFilter:e.target.value}); }} />
-                </div>
-                <div className="search-count">{results.reduce((acc,r) => acc + r.matches.length, 0)} matches in {results.length} files</div>
-                <div className="results">
-                  {results.map(r => (
-                    <div key={r.path} className="result-file">
-                      <button className="result-name" onClick={()=>openFile(r.path, r.matches[0]?.line)}>{r.name}</button>
-                      {r.matches.map((m,i) => (
-                        <button key={i} className="result-line" onClick={()=>openFile(r.path, m.line)}>
-                          <span className="line-num">{m.line}</span>{m.text.trim()}
-                        </button>
-                      ))}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            {tabView==="bookmarks" && (
-              <div className="tree">
-                {bookmarks.length===0 ? <div className="muted" style={{padding:8}}>{t("noBm")}</div> :
-                  bookmarks.map(p => (
-                    <div key={p} className="bm-row">
-                      <button className="tree-row" style={{flex:1}} onClick={()=>openFile(p)}>{p}</button>
-                      <button className="bm-remove" onClick={()=>toggleBm(p)}>✕</button>
-                    </div>
-                  ))}
-              </div>
-            )}
           </aside>
         )}
 
@@ -1079,6 +1057,32 @@ export default function App() {
         )}
       </main>
 
+      {/* Global search modal */}
+      {searchModalOpen && (
+        <div className="qo-overlay" onClick={() => setSearchModalOpen(false)}>
+          <div className="qo-modal" onClick={e => e.stopPropagation()}>
+            <input className="qo-input" autoFocus value={searchQ}
+              onChange={e => setSearchQ(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter" && results.length > 0 && results[0].matches.length > 0) { setSearchModalOpen(false); openFile(results[0].path, results[0].matches[0].line); } }}
+              placeholder="全局搜索…" spellCheck={false} />
+            <div className="qo-list">
+              {results.length === 0 ? (
+                <div className="ref-popup-empty">{searchQ.trim() ? "无结果" : "输入关键字搜索整个工作区"}</div>
+              ) : results.map(r => (
+                <div key={r.path} className="sm-file">
+                  <div className="sm-file-name">{r.name} <span className="muted">{r.path}</span></div>
+                  {r.matches.map((m, i) => (
+                    <button key={i} className="sm-line" onClick={() => { setSearchModalOpen(false); openFile(r.path, m.line); }}>
+                      <span className="sm-linenum">{m.line}</span>{m.text.trim()}
+                    </button>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Symbol fuzzy lookup modal - IDEA style Ctrl+Shift+N */}
       {symOpen && (
         <div className="qo-overlay" onClick={() => setSymOpen(false)}>
@@ -1145,6 +1149,13 @@ export default function App() {
     </div>
   );
 }
+
+
+
+
+
+
+
 
 
 
