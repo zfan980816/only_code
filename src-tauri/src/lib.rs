@@ -22,6 +22,7 @@ pub fn run() {
             commands::search,
             commands::resolve_definition,
             commands::find_references,
+            commands::goto_definition,
             commands::fuzzy_files
         ])
         .run(tauri::generate_context!())

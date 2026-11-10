@@ -285,6 +285,48 @@ pub fn resolve_definition(
 
 
 #[tauri::command]
+pub fn goto_definition(
+    workspace_id: String,
+    name: String,
+    current_path: String,
+) -> Result<Vec<NavigationTarget>, String> {
+    let root = workspace_root(&workspace_id)?;
+    let symbols = workspace_symbols(&workspace_id)?;
+    let mut targets: Vec<NavigationTarget> = symbols
+        .iter()
+        .filter(|symbol| {
+            symbol.name == name
+                && matches!(symbol.kind.as_str(), "function" | "method" | "class" | "interface" | "type" | "constant")
+        })
+        .map(|symbol| NavigationTarget {
+            path: symbol.path.clone(),
+            name: symbol.name.clone(),
+            kind: symbol.kind.clone(),
+            start: symbol.start,
+            end: symbol.end,
+            start_line: symbol.start_line + 1,
+            start_column: symbol.start_column + 1,
+        })
+        .take(100)
+        .collect();
+
+    if targets.is_empty() {
+        if let Ok(Some(symbol)) = db::find_symbol(&root.to_string_lossy(), &name) {
+            targets.push(NavigationTarget {
+                path: symbol.path,
+                name: symbol.name,
+                kind: symbol.kind,
+                start: symbol.start,
+                end: symbol.end,
+                start_line: symbol.start_line + 1,
+                start_column: symbol.start_column + 1,
+            });
+        }
+    }
+    Ok(targets)
+}
+
+#[tauri::command]
 pub fn find_references(
     workspace_id: String,
     name: String,

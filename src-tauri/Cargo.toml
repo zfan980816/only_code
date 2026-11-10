@@ -1,6 +1,6 @@
 [lib]
 name = "light_reader_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+crate-type = ["rlib"]
 
 [package]
 name = "light-reader"
@@ -38,4 +38,5 @@ dirs = "5"
 lto = true
 codegen-units = 1
 strip = true
+
 
