@@ -810,6 +810,11 @@ export default function App() {
                       </span>
                       <span className="code-text">
                         {line.tokens.map(renderToken)}
+                        {isFolded && isFoldable && (
+                          <span className="fold-placeholder"
+                            onClick={(e) => { e.stopPropagation(); toggleFold(i); }}
+                            title="Click to expand">{'{...}'}</span>
+                        )}
                       </span>
                     </div>
                   );
@@ -920,6 +925,7 @@ export default function App() {
     </div>
   );
 }
+
 
 
 

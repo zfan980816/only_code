@@ -593,3 +593,26 @@ html, body, #root { height: 100vh; overflow: hidden; }
 }
 .outline-arrow.open { color: var(--accent); }
 .outline-arrow:not(.open):not(:empty):hover { color: var(--accent); }
+
+
+/* ── Fold placeholder ({...} when collapsed, IDEA style) ── */
+.fold-placeholder {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11px;
+  font-style: italic;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.1s ease;
+  line-height: 1.5;
+}
+.fold-placeholder:hover {
+  background: var(--accent-light);
+  border-color: var(--accent);
+  color: var(--accent);
+}
