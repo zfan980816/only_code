@@ -650,7 +650,7 @@ html, body, #root { height: 100vh; overflow: hidden; }
 
 /* ── Virtual scrolling ── */
 .code { contain: strict; }
-.code .code-line { height: 22px; line-height: 22px; }
+.code .code-line { height: var(--code-line-h, 22px); line-height: var(--code-line-h, 22px); }
 
 
 /* ── Outline filter ── */
@@ -672,3 +672,4 @@ html, body, #root { height: 100vh; overflow: hidden; }
   font-size: 10px;
   color: var(--muted);
 }
+

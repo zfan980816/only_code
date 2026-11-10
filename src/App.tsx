@@ -29,7 +29,6 @@ const KW: Record<string, string[]> = {
 };
 
 let _inMultiLine = false;
-const LINE_H = 22; // px, must match .code line-height
 const OVERSCAN = 20; // extra lines rendered above/below viewport
 
 function hl(line: string, lang: string): { text: string; cls: string }[] {
@@ -177,6 +176,8 @@ export default function App() {
   const [outlineOpen, setOutlineOpen] = useState<Set<string>>(new Set());
   const [outlineFilter, setOutlineFilter] = useState("");
   const [scrollTop, setScrollTop] = useState(0);
+  const [codeFontSize, setCodeFontSize] = useState<number>(() => { const v = parseInt(localStorage.getItem("lr-font-size") ?? "13"); return v >= 9 && v <= 32 ? v : 13; });
+  const codeLineH = Math.round(codeFontSize * 1.7);
   const [viewportH, setViewportH] = useState(600);
   const [jumpTarget, setJumpTarget] = useState<{path:string; line:number} | null>(null);
   const [leftWidth, setLeftWidth] = useState(260);
@@ -216,7 +217,10 @@ export default function App() {
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.key === "p") { e.preventDefault(); setQuickOpen(true); setQuickQ(""); setQuickResults([]); setQuickIdx(0); }
+      if (e.ctrlKey && (e.key === "=" || e.key === "+")) { e.preventDefault(); setCodeFontSize(v => Math.min(32, v + 1)); }
+      if (e.ctrlKey && e.key === "-") { e.preventDefault(); setCodeFontSize(v => Math.max(9, v - 1)); }
+      if (e.ctrlKey && e.key === "0") { e.preventDefault(); setCodeFontSize(13); }
+            if (e.ctrlKey && e.key === "p") { e.preventDefault(); setQuickOpen(true); setQuickQ(""); setQuickResults([]); setQuickIdx(0); }
       if (e.ctrlKey && e.key === "f" && !e.shiftKey) { e.preventDefault(); setFileSearchVisible(true); setTimeout(() => fileSearchRef.current?.focus(), 50); }
       if (e.ctrlKey && e.shiftKey && e.key === "N") { e.preventDefault(); setSymOpen(true); setSymQ(""); setSymResults([]); setSymIdx(0); }
       if (e.ctrlKey && e.shiftKey && e.key === "F") { e.preventDefault(); setFocus(v=>!v); }
@@ -235,6 +239,19 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [quickQ, quickOpen, ws]);
 
+  // Ctrl+wheel zoom on code area
+  useEffect(() => {
+    const el = codeRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      setCodeFontSize(v => Math.max(9, Math.min(32, v + (e.deltaY < 0 ? 1 : -1))));
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [doc]);
+  
   useEffect(() => { if (quickOpen && quickRef.current) quickRef.current.focus(); }, [quickOpen]);
   useEffect(() => { if (symOpen && symRef.current) symRef.current.focus(); }, [symOpen]);
 
@@ -330,6 +347,8 @@ export default function App() {
     localStorage.setItem("lr-last-active", String(activeTab));
   }, [ws, tabs, activeTab]);
 
+  useEffect(() => { localStorage.setItem("lr-font-size", String(codeFontSize)); }, [codeFontSize]);
+  
   // Session restore: on startup, reopen last workspace + tabs
   useEffect(() => {
     const savedWs = localStorage.getItem("lr-last-ws");
@@ -731,11 +750,11 @@ export default function App() {
   const isLargeFile = codeLines.length > 300;
   const visibleRange = useMemo(() => {
     if (!isLargeFile) return { start: 0, end: codeLines.length };
-    const start = Math.max(0, Math.floor(scrollTop / LINE_H) - OVERSCAN);
-    const visibleCount = Math.ceil(viewportH / LINE_H) + OVERSCAN * 2;
+    const start = Math.max(0, Math.floor(scrollTop / codeLineH) - OVERSCAN);
+    const visibleCount = Math.ceil(viewportH / codeLineH) + OVERSCAN * 2;
     const end = Math.min(codeLines.length, start + visibleCount);
     return { start, end };
-  }, [isLargeFile, scrollTop, viewportH, codeLines.length]);
+  }, [isLargeFile, scrollTop, viewportH, codeLines.length, codeLineH]);
 
   const onCodeScroll = useCallback((e: React.UIEvent<HTMLPreElement>) => {
     const el = e.currentTarget;
@@ -752,7 +771,7 @@ export default function App() {
       if (!codeEl) return;
       if (codeLines.length > 300) {
         // Virtual scrolling: compute offset directly since the line may not be in the DOM
-        codeEl.scrollTop = Math.max(0, (jumpTarget.line - 1) * LINE_H - codeEl.clientHeight / 2);
+        codeEl.scrollTop = Math.max(0, (jumpTarget.line - 1) * codeLineH - codeEl.clientHeight / 2);
       } else {
         const allLines = codeEl.querySelectorAll(".code-line");
         if (jumpTarget.line <= allLines.length) {
@@ -764,7 +783,7 @@ export default function App() {
       }
     }, 200);
     return () => clearTimeout(timer);
-  }, [doc, jumpTarget, activeTabData, codeLines]);
+  }, [doc, jumpTarget, activeTabData, codeLines, codeLineH]);
   const goMatch = useCallback((dir: number) => {
     if (matchLines.length === 0) return;
     let next = matchIdx + dir;
@@ -776,13 +795,13 @@ export default function App() {
     const codeEl = codeRef.current;
     if (codeEl) {
       if (isLargeFile) {
-        codeEl.scrollTop = Math.max(0, targetLine * LINE_H - codeEl.clientHeight / 2);
+        codeEl.scrollTop = Math.max(0, targetLine * codeLineH - codeEl.clientHeight / 2);
       } else {
         const lineEl = codeEl.querySelector(`.code-line:nth-child(${targetLine + 1})`);
         if (lineEl) lineEl.scrollIntoView({ behavior: "smooth", block: "center" });
       }
     }
-  }, [matchIdx, matchLines, isLargeFile]);
+  }, [matchIdx, matchLines, isLargeFile, codeLineH]);
 
   return (
     <div className={`app ${focus ? "focus" : ""}`}>
@@ -920,8 +939,8 @@ export default function App() {
                   <button className="btn-mini" onClick={() => { setFileSearchVisible(false); setFileSearch(""); setMatchIdx(0); }}>✕</button>
                 </div>
               )}
-              <pre ref={codeRef} className="code" onScroll={onCodeScroll}>
-                {isLargeFile && visibleRange.start > 0 && <div style={{ height: visibleRange.start * LINE_H }} />}
+              <pre ref={codeRef} className="code" onScroll={onCodeScroll} style={{ fontSize: `${codeFontSize}px`, "--code-line-h": `${codeLineH}px` } as React.CSSProperties}>
+                {isLargeFile && visibleRange.start > 0 && <div style={{ height: visibleRange.start * codeLineH }} />}
                 {codeLines.slice(visibleRange.start, visibleRange.end).map((line, idx) => {
                   const i = visibleRange.start + idx;
                   if (hiddenLines.has(i)) return null;
@@ -1016,7 +1035,7 @@ export default function App() {
                     </div>
                   );
                 })}
-                {isLargeFile && visibleRange.end < codeLines.length && <div style={{ height: (codeLines.length - visibleRange.end) * LINE_H }} />}
+                {isLargeFile && visibleRange.end < codeLines.length && <div style={{ height: (codeLines.length - visibleRange.end) * codeLineH }} />}
               </pre>
             </>
           ) : <div className="no-file">{t("noFile")}</div>}
@@ -1120,11 +1139,14 @@ export default function App() {
       <footer className="stbar">
         <span>{status}</span>
         <span className="muted">Ln {cursor.line}, Col {cursor.col}</span>
-        <span className="muted">Ctrl+P File · Ctrl+Shift+N Symbol · Ctrl+F Find · Ctrl+Shift+F Focus</span>
+        <span className="muted" style={{ marginLeft: "auto" }}>{Math.round(codeFontSize / 13 * 100)}%</span>
+        <span className="muted">Ctrl+滚轮缩放 · Ctrl+P File · Ctrl+Shift+N Symbol · Ctrl+F Find</span>
       </footer>
     </div>
   );
 }
+
+
 
 
 
