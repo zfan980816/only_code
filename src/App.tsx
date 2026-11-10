@@ -515,13 +515,12 @@ export default function App() {
     const foldable = new Set<number>();
     const ranges = new Map<number, number>(); // start line -> end line (inclusive)
 
-    // Pass 1: bracket-based folding. Track (), [], {} depth across lines,
-    // skipping strings and comments so brackets inside them don't affect the count.
-    let depth = 0;
-    const stack: Array<{ line: number; depthBefore: number }> = [];
+    // Pass 1: bracket-based folding. Track each opening bracket individually on a stack
+    // so patterns like "} catch (Exception e) {" correctly close try AND open catch as
+    // two independent foldable regions (IDEA behavior).
+    const bracketStack: Array<{ line: number; char: string }> = [];
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
-      let delta = 0;
       let inStr: string | null = null;
       for (let j = 0; j < line.length; j++) {
         const ch = line[j];
@@ -530,20 +529,17 @@ export default function App() {
         } else if (ch === '"' || ch === "'" || ch === "`") {
           inStr = ch;
         } else if (ch === "#") {
-          break; // rest of line is a comment
+          break; // Python-style comment
         } else if (ch === "(" || ch === "[" || ch === "{") {
-          delta++;
+          bracketStack.push({ line: i, char: ch });
         } else if (ch === ")" || ch === "]" || ch === "}") {
-          delta--;
+          const open = bracketStack.pop();
+          if (open) {
+            foldable.add(open.line);
+            const existing = ranges.get(open.line);
+            if (existing === undefined || i > existing) ranges.set(open.line, i);
+          }
         }
-      }
-      const depthBefore = depth;
-      depth += delta;
-      if (depth > depthBefore) stack.push({ line: i, depthBefore });
-      while (stack.length > 0 && depth <= stack[stack.length - 1].depthBefore) {
-        const start = stack.pop()!.line;
-        foldable.add(start);
-        ranges.set(start, i);
       }
     }
 
@@ -802,6 +798,7 @@ export default function App() {
                   };
                   // IDEA fold: truncate line at the fold-opening bracket, show … placeholder
                   let foldBracketPos = -1;
+                  let foldBracketChar = "";
                   
                   if (isFolded && isFoldable) {
                     let d = 0, inStr: string | null = null;
@@ -810,11 +807,11 @@ export default function App() {
                       if (inStr) { if (ch === inStr && line.raw[j-1] !== "\\") inStr = null; }
                       else if (ch === '"' || ch === "'" || ch === "`") inStr = ch;
                       else if (ch === "#") break;
-                      else if (ch === "(" || ch === "[" || ch === "{") { d++; foldBracketPos = j;  }
+                      else if (ch === "(" || ch === "[" || ch === "{") { d++; foldBracketPos = j; foldBracketChar = ch; }
                       else if (ch === ")" || ch === "]" || ch === "}") d--;
                     }
                   }
-                  const placeholder = "…";
+                  const placeholder = foldBracketChar === "{" ? "{...}" : foldBracketChar === "(" ? "(...)" : foldBracketChar === "[" ? "[...]" : "...";
                   // Filter tokens: keep only text before the fold bracket
                   let charCursor = 0;
                   const visibleTokens: { text: string; cls: string }[] = [];
@@ -971,6 +968,9 @@ export default function App() {
     </div>
   );
 }
+
+
+
 
 
 
