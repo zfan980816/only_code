@@ -813,7 +813,7 @@ export default function App() {
                         {isFolded && isFoldable && (
                           <span className="fold-placeholder"
                             onClick={(e) => { e.stopPropagation(); toggleFold(i); }}
-                            title="Click to expand">{'{...}'}</span>
+                            title="Click to expand">{line.raw.trimEnd().endsWith("(") ? "...)" : line.raw.trimEnd().endsWith("{") ? "{...}" : "..."}</span>
                         )}
                       </span>
                     </div>
@@ -925,6 +925,7 @@ export default function App() {
     </div>
   );
 }
+
 
 
 
