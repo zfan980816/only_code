@@ -505,7 +505,7 @@ export default function App() {
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault();
       try {
-        const targets = await call<NavTarget[]>("goto_definition", { workspaceId: ws.id, name: word, current_path: activeTabData.path });
+        const targets = await call<NavTarget[]>("goto_definition", { workspaceId: ws.id, name: word, currentPath: activeTabData.path });
         if (targets.length === 1) {
           openFile(targets[0].path, targets[0].startLine);
         } else if (targets.length > 1) {
@@ -741,7 +741,7 @@ export default function App() {
     const el = e.currentTarget;
     setScrollTop(el.scrollTop);
     setViewportH(el.clientHeight || 600);
-
+  }, []);
     // Scroll to jump target when doc changes
   useEffect(() => {
     console.log("[scrollEffect] jumpTarget:", jumpTarget, "doc:", !!doc, "activePath:", activeTabData?.path);
@@ -765,7 +765,6 @@ export default function App() {
     }, 200);
     return () => clearTimeout(timer);
   }, [doc, jumpTarget, activeTabData, codeLines]);
-  }, []);
   const goMatch = useCallback((dir: number) => {
     if (matchLines.length === 0) return;
     let next = matchIdx + dir;
@@ -1126,6 +1125,7 @@ export default function App() {
     </div>
   );
 }
+
 
 
 
