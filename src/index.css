@@ -578,3 +578,18 @@ html, body, #root { height: 100vh; overflow: hidden; }
   border-radius: 2px;
   box-shadow: 0 1px 0 rgba(255,193,7,.4);
 }
+
+
+/* ── Outline tree arrow ── */
+.outline-arrow {
+  display: inline-block;
+  width: 14px;
+  flex-shrink: 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+.outline-arrow.open { color: var(--accent); }
+.outline-arrow:not(.open):not(:empty):hover { color: var(--accent); }

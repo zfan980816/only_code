@@ -10,7 +10,7 @@ async function call<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
 interface Ws { id: string; root: string; name: string; indexedFiles: number; }
 interface N { name: string; path: string; isDir: boolean; }
 interface Doc { path: string; name: string; language: string; content: string; size: number; truncated: boolean; }
-interface Sym { name: string; kind: string; start: number; startLine: number; startColumn: number; }
+interface Sym { name: string; kind: string; path: string; start: number; end: number; startLine: number; startColumn: number; endLine: number; endColumn: number; }
 interface NavTarget { path: string; name: string; kind: string; start: number; startLine: number; }
 interface SRes { results: { path: string; name: string; matches: { line: number; text: string }[] }[]; truncated: boolean; filesSearched: number; }
 interface Tab { path: string; name: string; lang: string; }
@@ -108,6 +108,28 @@ function getWordIndex(text: string, clicked: number): { start: number; end: numb
   return { start, end };
 }
 
+
+
+interface SymNode { sym: Sym; children: SymNode[]; }
+
+function buildSymTree(flat: Sym[]): SymNode[] {
+  const sorted = [...flat].sort((a, b) => a.startLine - b.startLine || a.startColumn - b.startColumn);
+  const roots: SymNode[] = [];
+  const stack: SymNode[] = [];
+  for (const s of sorted) {
+    const node: SymNode = { sym: s, children: [] };
+    while (stack.length > 0) {
+      const top = stack[stack.length - 1];
+      if (s.startLine > top.sym.endLine || (s.startLine === top.sym.endLine && s.startColumn >= top.sym.endColumn)) {
+        stack.pop();
+      } else break;
+    }
+    if (stack.length > 0) stack[stack.length - 1].children.push(node);
+    else roots.push(node);
+    stack.push(node);
+  }
+  return roots;
+}
 export default function App() {
   const [lang, setLang] = useState<Lang>("zh");
   const t = (k: string) => (L[lang] as Record<string,string>)[k] ?? k;
@@ -149,6 +171,7 @@ export default function App() {
   const [currentLine, setCurrentLine] = useState(0);
   const [highlightWord, setHighlightWord] = useState("");
   const [foldedLines, setFoldedLines] = useState<Set<number>>(new Set());
+  const [outlineOpen, setOutlineOpen] = useState<Set<string>>(new Set());
   const [jumpTarget, setJumpTarget] = useState<{path:string; line:number} | null>(null);
   const [leftWidth, setLeftWidth] = useState(260);
   const [rightWidth, setRightWidth] = useState(230);
@@ -575,6 +598,34 @@ export default function App() {
   }, []);
   const isBm = activeTabData?.path ? bookmarks.includes(activeTabData.path) : false;
 
+  const toggleOutline = useCallback((key: string) => {
+    setOutlineOpen(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }, []);
+  
+  const renderOutlineSym = (node: SymNode, depth: number): React.ReactNode => {
+    const s = node.sym;
+    const key = `${s.path}:${s.startLine}:${s.name}`;
+    const hasChildren = node.children.length > 0;
+    const isOpen = outlineOpen.has(key);
+    return (
+      <div key={key}>
+        <div className="sym-row" style={{ paddingLeft: 8 + depth * 14 }}
+          onClick={(e) => { if (hasChildren && (e.target as HTMLElement).classList.contains("outline-arrow")) { e.stopPropagation(); toggleOutline(key); } else { openFile(activeTabData?.path || "", s.startLine + 1); setHighlightWord(s.name); setCurrentLine(s.startLine + 1); } }}
+          onContextMenu={(e) => { e.preventDefault(); findRefs(s.name); }}
+          title="Click name: jump · Click arrow: expand/collapse · Right-click: find refs">
+          {hasChildren && <span className={`outline-arrow ${isOpen ? "open" : ""}`}>{isOpen ? "▾" : "▸"}</span>}
+          {!hasChildren && <span className="outline-arrow"> </span>}
+          <span className="kind">{s.kind}</span>{s.name}
+        </div>
+        {hasChildren && isOpen && node.children.map(c => renderOutlineSym(c, depth + 1))}
+      </div>
+    );
+  };
+  
   const renderTree = (nodes: N[], depth: number) => nodes.map(n => (
     <div key={n.path || n.name}>
       <button className={`tree-row ${activeTabData?.path === n.path && !n.isDir ? "tree-active" : ""}`}
@@ -588,6 +639,16 @@ export default function App() {
     </div>
   ));
 
+  const symTree = useMemo(() => buildSymTree(syms), [syms]);
+  
+  // Auto-expand all outline nodes when a new file is loaded
+  useEffect(() => {
+    const all = new Set<string>();
+    const walk = (nodes: SymNode[]) => { for (const n of nodes) { all.add(`${n.sym.path}:${n.sym.startLine}:${n.sym.name}`); walk(n.children); } };
+    walk(symTree);
+    setOutlineOpen(all);
+  }, [symTree]);
+  
   const codeLines = useMemo(() => {
     if (!doc) return [];
     return doc.content.split("\n").map(line => ({ raw: line, tokens: hl(line, doc.language) }));
@@ -765,14 +826,7 @@ export default function App() {
             <div className="panel">
               <h4>{t("outline")}</h4>
               {syms.length===0 ? <span className="muted">{t("noSyms")}</span> :
-                syms.map((s,i) => (
-                  <div key={i} className="sym-row"
-                    onClick={() => openFile(activeTabData?.path || "", s.startLine + 1)}
-                    onContextMenu={e => { e.preventDefault(); findRefs(s.name); }}
-                    title="Click: Go to Def · Right-click: Find Refs">
-                    <span className="kind">{s.kind}</span>{s.name}
-                  </div>
-                ))}
+                symTree.map(n => renderOutlineSym(n, 0))}
               {syms.length>0 && <button className="find-refs-btn" onClick={() => syms[0] && findRefs(syms[0].name)}>{t("findRefs")} →</button>}
             </div>
             {refs.length > 0 && (
@@ -866,6 +920,9 @@ export default function App() {
     </div>
   );
 }
+
+
+
 
 
 
