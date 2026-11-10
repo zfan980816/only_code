@@ -791,3 +791,25 @@ html, body, #root { height: 100vh; overflow: hidden; }
   padding: 8px 14px 6px;
   letter-spacing: .06em;
 }
+
+
+/* ── 文件 folder list (Codex 项目 style) ── */
+.folder-list { padding: 0 8px 12px; }
+.folder-item { margin-bottom: 1px; }
+.folder-row {
+  display: flex; align-items: center; gap: 9px;
+  width: 100%; text-align: left;
+  padding: 7px 10px;
+  border: 0; border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13.5px;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+.folder-row:hover { background: rgba(0,0,0,.055); color: var(--text); }
+.folder-item.on .folder-row { color: var(--text); font-weight: 600; background: rgba(0,0,0,.05); }
+.folder-ic { color: #B8B2A8; flex-shrink: 0; }
+.folder-item.on .folder-ic { color: var(--accent); }
+.folder-files { padding: 0 0 4px 14px; }
+.folder-files .tree-row { font-size: 12.5px; padding: 4px 9px; }

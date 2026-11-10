@@ -113,6 +113,10 @@ function getWordIndex(text: string, clicked: number): { start: number; end: numb
 
 interface SymNode { sym: Sym; children: SymNode[]; }
 
+function normPath(p?: string): string {
+  return (p ?? "").replace(/^\\\\\?\\/, "").replace(/[\\/]+$/, "").toLowerCase();
+}
+
 function buildSymTree(flat: Sym[]): SymNode[] {
   const sorted = [...flat].sort((a, b) => a.startLine - b.startLine || a.startColumn - b.startColumn);
   const roots: SymNode[] = [];
@@ -311,8 +315,7 @@ export default function App() {
       setFoldedLines(new Set()); setHighlightWord(""); setCurrentLine(0); setJumpTarget(null);
       setStatus(`${w.name} · ${w.indexedFiles} indexed`);
       setWsList(prev => {
-        const norm = (p: string) => p.replace(/^\\\\\?\\\\/, "").replace(/\/$/, "").toLowerCase();
-        const next = [{ root, name: w.name }, ...prev.filter(x => norm(x.root) !== norm(root) && x.name !== w.name)];
+        const next = [{ root, name: w.name }, ...prev.filter(x => normPath(x.root) !== normPath(root))];
         localStorage.setItem("lr-ws-list", JSON.stringify(next));
         return next;
       });
@@ -814,7 +817,7 @@ export default function App() {
     <div className={`app ${focus ? "focus" : ""}`}>
       <header className="hdr">
         <span className="logo">LR</span>
-        <span className="ws-name">{ws ? ws.name : t("noWs")}</span>
+        <span />
         <button className="btn-focus" onClick={() => setFocus(!focus)}>{t("focus")}</button>
         <button className="btn-lang" onClick={() => setLang(lang === "zh" ? "en" : "zh")}>{lang === "zh" ? "EN" : "中文"}</button>
         <button className="btn-open" onClick={openFolder}>{t("open")}</button>
@@ -871,9 +874,25 @@ export default function App() {
               </>
             )}
               <div className="side-section-title">文件</div>
-              <div className="tree">
-                {ws && expanded[""] ? expanded[""].map(c => renderTree([c], 0)) : (
-                  <div className="muted" style={{ padding: "10px 12px", fontSize: 12.5 }}>打开一个文件夹开始阅读</div>
+              <div className="folder-list">
+                {wsList.map(w => {
+                  const active = normPath(ws?.root) === normPath(w.root);
+                  return (
+                    <div key={w.root} className={`folder-item ${active ? "on" : ""}`}>
+                      <button className="folder-row" onClick={() => openWorkspace(w.root)} title={w.root}>
+                        <svg className="folder-ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                        <span>{w.name}</span>
+                      </button>
+                      {active && expanded[""] && (
+                        <div className="folder-files">
+                          {expanded[""].map(c => renderTree([c], 0))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {wsList.length === 0 && (
+                  <div className="muted" style={{ padding: "8px 12px", fontSize: 12.5 }}>点上方"打开文件夹"导入</div>
                 )}
               </div>
           </aside>
@@ -1149,6 +1168,9 @@ export default function App() {
     </div>
   );
 }
+
+
+
 
 
 
