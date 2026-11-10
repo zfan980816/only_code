@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 async function call<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
   return invoke<T>(cmd, args);
@@ -126,6 +127,10 @@ export default function App() {
   const codeRef = useRef<HTMLPreElement>(null);
   const [searchQ, setSearchQ] = useState("");
   const [results, setResults] = useState<SRes["results"]>([]);
+  const [searchCase, setSearchCase] = useState(false);
+  const [searchRegex, setSearchRegex] = useState(false);
+  const [searchWhole, setSearchWhole] = useState(false);
+  const [searchPath, setSearchPath] = useState("");
   const [focus, setFocus] = useState(false);
   const [tabView, setTabView] = useState<"files"|"search"|"bookmarks">("files");
   const [err, setErr] = useState<string | null>(null);
@@ -137,6 +142,13 @@ export default function App() {
   const [quickQ, setQuickQ] = useState("");
   const [quickResults, setQuickResults] = useState<string[]>([]);
   const [quickIdx, setQuickIdx] = useState(0);
+  const [symOpen, setSymOpen] = useState(false);
+  const [symQ, setSymQ] = useState("");
+  const [symResults, setSymResults] = useState<NavTarget[]>([]);
+  const [symIdx, setSymIdx] = useState(0);
+  const [currentLine, setCurrentLine] = useState(0);
+  const [highlightWord, setHighlightWord] = useState("");
+  const [foldedLines, setFoldedLines] = useState<Set<number>>(new Set());
   const [jumpTarget, setJumpTarget] = useState<{path:string; line:number} | null>(null);
   const [leftWidth, setLeftWidth] = useState(260);
   const [rightWidth, setRightWidth] = useState(230);
@@ -144,6 +156,8 @@ export default function App() {
   const [refPopup, setRefPopup] = useState<{x:number;y:number;name:string;targets:NavTarget[]} | null>(null);
   const quickRef = useRef<HTMLInputElement>(null);
   const fileSearchRef = useRef<HTMLInputElement>(null);
+  const symRef = useRef<HTMLInputElement>(null);
+  const activeTabRef = useRef<string | undefined>(undefined);
 
   const toggleBm = useCallback((p: string) => {
     setBookmarks(prev => { const n = prev.includes(p) ? prev.filter(x=>x!==p) : [p,...prev]; localStorage.setItem("lr-bm", JSON.stringify(n)); return n; });
@@ -175,8 +189,9 @@ export default function App() {
     const h = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.key === "p") { e.preventDefault(); setQuickOpen(true); setQuickQ(""); setQuickResults([]); setQuickIdx(0); }
       if (e.ctrlKey && e.key === "f" && !e.shiftKey) { e.preventDefault(); setFileSearchVisible(true); setTimeout(() => fileSearchRef.current?.focus(), 50); }
+      if (e.ctrlKey && e.shiftKey && e.key === "N") { e.preventDefault(); setSymOpen(true); setSymQ(""); setSymResults([]); setSymIdx(0); }
       if (e.ctrlKey && e.shiftKey && e.key === "F") { e.preventDefault(); setFocus(v=>!v); }
-      if (e.key === "Escape") { setQuickOpen(false); setFileSearchVisible(false); setFileSearch(""); setMatchIdx(0); setRefPopup(null); }
+      if (e.key === "Escape") { setQuickOpen(false); setFileSearchVisible(false); setFileSearch(""); setMatchIdx(0); setRefPopup(null); setSymOpen(false); }
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
@@ -192,6 +207,54 @@ export default function App() {
   }, [quickQ, quickOpen, ws]);
 
   useEffect(() => { if (quickOpen && quickRef.current) quickRef.current.focus(); }, [quickOpen]);
+  useEffect(() => { if (symOpen && symRef.current) symRef.current.focus(); }, [symOpen]);
+
+  // Symbol lookup debounce
+  useEffect(() => {
+    if (!symOpen || !ws) return;
+    const timer = setTimeout(async () => {
+      try { setSymResults(await call<NavTarget[]>("fuzzy_symbols", { workspaceId: ws.id, query: symQ.trim(), limit: 30 })); setSymIdx(0); } catch {}
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [symQ, symOpen, ws]);
+
+  // Tauri events: streaming search results + file change refresh + index progress
+  useEffect(() => {
+    if (!ws) return;
+    const unsubs: Array<() => void> = [];
+    const setup = async () => {
+      unsubs.push(await listen<SRes["results"]>("search_batch", (ev) => {
+        if (!Array.isArray(ev.payload)) return;
+        setResults(prev => {
+          const map = new Map(prev.map(r => [r.path, r]));
+          for (const batch of ev.payload) {
+            const existing = map.get(batch.path);
+            if (existing) existing.matches.push(...batch.matches);
+            else map.set(batch.path, { ...batch, matches: [...batch.matches] });
+          }
+          return [...map.values()];
+        });
+      }));
+      unsubs.push(await listen<string>("files_changed", () => {
+        // Reload tree root + active file
+        call<N[]>("file_tree", { workspaceId: ws.id }).then(ch => {
+          setTree([{ name: ws.name, path: "", isDir: true }]);
+          setExpanded(p => { const c = { ...p, "": ch }; return c; });
+        }).catch(() => {});
+        if (activeTabRef.current) {
+          call<Doc>("file_read", { workspaceId: ws.id, path: activeTabRef.current })
+            .then(d => setDoc(d)).catch(() => {});
+        }
+      }));
+      unsubs.push(await listen<{ indexedFiles: number }>("index_progress", (ev) => {
+        if (ev.payload?.indexedFiles !== undefined) {
+          setStatus(`${ws.name} · ${ev.payload.indexedFiles} indexed`);
+        }
+      }));
+    };
+    setup();
+    return () => unsubs.forEach(fn => { try { fn(); } catch {} });
+  }, [ws]);
 
 
   const openFolder = useCallback(async () => {
@@ -217,6 +280,7 @@ export default function App() {
 
 
   const activeTabData = tabs[activeTab];
+  activeTabRef.current = activeTabData?.path;
   const openFile = useCallback(async (path: string, targetLine?: number) => {
     if (!ws) return;
     try {
@@ -260,10 +324,11 @@ export default function App() {
     });
   }, [activeTab, switchTab]);
 
-  const doSearch = useCallback(async (q: string) => {
+  const doSearch = useCallback(async (q: string, opts?: { caseSensitive?: boolean; regex?: boolean; wholeWord?: boolean; pathFilter?: string }) => {
     if (!ws || !q.trim()) { setResults([]); return; }
     try {
-      const r = await call<SRes>("search", { workspaceId: ws.id, query: q.trim(), options: { caseSensitive:false, regex:false, wholeWord:false, maxResults:200 } });
+      setResults([]);
+      const r = await call<SRes>("search", { workspaceId: ws.id, query: q.trim(), options: { caseSensitive: opts?.caseSensitive ?? false, regex: opts?.regex ?? false, wholeWord: opts?.wholeWord ?? false, pathFilter: opts?.pathFilter || undefined, maxResults: 500 } });
       setResults(r.results);
     } catch (e) { setStatus(`ERR: ${e}`); }
   }, [ws]);
@@ -324,6 +389,8 @@ export default function App() {
     }
 
     setCursor({ line: lineIdx + 1, col: charIdx + 1 });
+    setCurrentLine(lineIdx + 1);
+    setHighlightWord(word);
 
     // Ctrl+Alt+Click: Find Usages (IDEA style)
     if (e.ctrlKey && e.altKey) {
@@ -413,6 +480,50 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [doc, jumpTarget, activeTabData]);
 
+
+
+  // Code folding: lines with higher indent than next non-empty line are foldable
+  const foldableLines = useMemo(() => {
+    if (!doc) return new Set<number>();
+    const lines = doc.content.split("\n");
+    const set = new Set<number>();
+    for (let i = 0; i < lines.length - 1; i++) {
+      const cur = lines[i];
+      const next = lines[i + 1] ?? "";
+      if (!cur.trim()) continue;
+      const curIndent = cur.length - cur.trimStart().length;
+      const nextIndent = next.length - next.trimStart().length;
+      if (next.trim() && nextIndent > curIndent) set.add(i);
+    }
+    return set;
+  }, [doc]);
+
+  // Which lines are hidden because their fold-parent is collapsed
+  const hiddenLines = useMemo(() => {
+    if (!doc || foldedLines.size === 0) return new Set<number>();
+    const lines = doc.content.split("\n");
+    const hidden = new Set<number>();
+    for (const start of foldedLines) {
+      const curIndent = lines[start].length - lines[start].trimStart().length;
+      let j = start + 1;
+      while (j < lines.length) {
+        const line = lines[j];
+        if (line.trim() && (line.length - line.trimStart().length) <= curIndent) break;
+        hidden.add(j);
+        j++;
+      }
+    }
+    return hidden;
+  }, [doc, foldedLines]);
+
+  const toggleFold = useCallback((lineIdx: number) => {
+    setFoldedLines(prev => {
+      const next = new Set(prev);
+      if (next.has(lineIdx)) next.delete(lineIdx);
+      else next.add(lineIdx);
+      return next;
+    });
+  }, []);
   const isBm = activeTabData?.path ? bookmarks.includes(activeTabData.path) : false;
 
   const renderTree = (nodes: N[], depth: number) => nodes.map(n => (
@@ -478,7 +589,13 @@ export default function App() {
             {tabView==="search" && (
               <div className="search-wrap">
                 <input className="search-input" value={searchQ} placeholder="Search..."
-                  onChange={e => { setSearchQ(e.target.value); doSearch(e.target.value); }} />
+                  onChange={e => { setSearchQ(e.target.value); doSearch(e.target.value, { caseSensitive:searchCase, regex:searchRegex, wholeWord:searchWhole, pathFilter:searchPath }); }} />
+                <div className="search-opts">
+                  <button className={`opt ${searchCase?"on":""}`} onClick={()=>{ const v=!searchCase; setSearchCase(v); doSearch(searchQ,{caseSensitive:v,regex:searchRegex,wholeWord:searchWhole,pathFilter:searchPath}); }} title="Case sensitive">Aa</button>
+                  <button className={`opt ${searchRegex?"on":""}`} onClick={()=>{ const v=!searchRegex; setSearchRegex(v); doSearch(searchQ,{caseSensitive:searchCase,regex:v,wholeWord:searchWhole,pathFilter:searchPath}); }} title="Regex">.*</button>
+                  <button className={`opt ${searchWhole?"on":""}`} onClick={()=>{ const v=!searchWhole; setSearchWhole(v); doSearch(searchQ,{caseSensitive:searchCase,regex:searchRegex,wholeWord:v,pathFilter:searchPath}); }} title="Whole word">W</button>
+                  <input className="opt-path" value={searchPath} placeholder="path filter…" onChange={e=>{ setSearchPath(e.target.value); doSearch(searchQ,{caseSensitive:searchCase,regex:searchRegex,wholeWord:searchWhole,pathFilter:e.target.value}); }} />
+                </div>
                 <div className="results">
                   {results.map(r => (
                     <div key={r.path} className="result-file">
@@ -546,15 +663,47 @@ export default function App() {
                 </div>
               )}
               <pre ref={codeRef} className="code">
-                {codeLines.map((line, i) => (
-                  <div key={i} className={`code-line ${searchMatches.has(i) ? "search-match" : ""} ${matchLines[matchIdx] === i ? "search-current" : ""} ${jumpTarget && jumpTarget.path === activeTabData?.path && jumpTarget.line === i + 1 ? "jump-target" : ""}`}
-                    onClick={(e) => handleCodeClick(e, i)}>
-                    <span className="line-num">{i+1}</span>
-                    <span className="code-text">
-                      {line.tokens.map((tk, j) => tk.cls ? <span key={j} className={tk.cls}>{tk.text}</span> : <span key={j}>{tk.text}</span>)}
-                    </span>
-                  </div>
-                ))}
+                {codeLines.map((line, i) => {
+                  if (hiddenLines.has(i)) return null;
+                  const isFoldable = foldableLines.has(i);
+                  const isFolded = foldedLines.has(i);
+                  const lineClasses = [
+                    "code-line",
+                    searchMatches.has(i) ? "search-match" : "",
+                    matchLines[matchIdx] === i ? "search-current" : "",
+                    jumpTarget && jumpTarget.path === activeTabData?.path && jumpTarget.line === i + 1 ? "jump-target" : "",
+                    currentLine === i + 1 ? "current-line" : "",
+                  ].filter(Boolean).join(" ");
+                  const renderToken = (tk: { text: string; cls: string }, j: number) => {
+                    if (highlightWord && tk.text.includes(highlightWord)) {
+                      const parts = tk.text.split(highlightWord);
+                      return (
+                        <span key={j} className={tk.cls || undefined}>
+                          {parts.map((part, pi) => (
+                            <span key={pi}>
+                              {part}
+                              {pi < parts.length - 1 && <span className="sym-hl">{highlightWord}</span>}
+                            </span>
+                          ))}
+                        </span>
+                      );
+                    }
+                    return tk.cls ? <span key={j} className={tk.cls}>{tk.text}</span> : <span key={j}>{tk.text}</span>;
+                  };
+                  return (
+                    <div key={i} className={lineClasses}
+                      onClick={(e) => handleCodeClick(e, i)}>
+                      <span className="line-num">{i+1}</span>
+                      <span className={`fold-gutter ${isFoldable ? "foldable" : ""} ${isFolded ? "folded" : ""}`}
+                        onClick={(e) => { if (isFoldable) { e.stopPropagation(); toggleFold(i); } }}>
+                        {isFoldable ? (isFolded ? "▸" : "▾") : ""}
+                      </span>
+                      <span className="code-text">
+                        {line.tokens.map(renderToken)}
+                      </span>
+                    </div>
+                  );
+                })}
               </pre>
             </>
           ) : <div className="no-file">{t("noFile")}</div>}
@@ -603,6 +752,37 @@ export default function App() {
         )}
       </main>
 
+      {/* Symbol fuzzy lookup modal - IDEA style Ctrl+Shift+N */}
+      {symOpen && (
+        <div className="qo-overlay" onClick={() => setSymOpen(false)}>
+          <div className="qo-modal" onClick={e => e.stopPropagation()}>
+            <input ref={symRef} className="qo-input" value={symQ}
+              onChange={e => setSymQ(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === "ArrowDown") { e.preventDefault(); setSymIdx(i => Math.min(i+1, symResults.length-1)); }
+                if (e.key === "ArrowUp") { e.preventDefault(); setSymIdx(i => Math.max(i-1, 0)); }
+                if (e.key === "Enter" && symResults[symIdx]) {
+                  const tg = symResults[symIdx];
+                  setSymOpen(false); openFile(tg.path, tg.startLine);
+                }
+              }}
+              placeholder="Search symbols: function, class, method…" spellCheck={false} />
+            <div className="qo-list">
+              {symResults.length === 0 ? (
+                <div className="ref-popup-empty">No symbols found</div>
+              ) : symResults.map((tg, i) => (
+                <button key={`${tg.path}:${tg.startLine}:${i}`} className={`qo-item ${i === symIdx ? "on" : ""}`}
+                  onClick={() => { setSymOpen(false); openFile(tg.path, tg.startLine); }}
+                  onMouseEnter={() => setSymIdx(i)}>
+                  <span className="kind">{tg.kind}</span> {tg.name}
+                  <span className="muted" style={{fontSize:10, marginLeft:8}}>{tg.path}:{tg.startLine}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Reference/Definition popup - IDEA style */}
       {refPopup && (
         <>
@@ -621,7 +801,7 @@ export default function App() {
                   onClick={() => { setRefPopup(null); openFile(tg.path, tg.startLine); }}>
                   <span className="kind">{tg.kind}</span>
                   <span className="ref-popup-path">{tg.path}</span>
-                  <span className="ref-popup-line">:{tg.startLine + 1}</span>
+                  <span className="ref-popup-line">:{tg.startLine}</span>
                 </button>
               ))}
             </div>
@@ -632,10 +812,18 @@ export default function App() {
       <footer className="stbar">
         <span>{status}</span>
         <span className="muted">Ln {cursor.line}, Col {cursor.col}</span>
-        <span className="muted">Ctrl+P Quick · Ctrl+F Find · Ctrl+Shift+F Focus</span>
+        <span className="muted">Ctrl+P File · Ctrl+Shift+N Symbol · Ctrl+F Find · Ctrl+Shift+F Focus</span>
       </footer>
     </div>
   );
 }
+
+
+
+
+
+
+
+
 
 

@@ -412,3 +412,65 @@ pub fn fuzzy_files(
     results.truncate(max);
     Ok(results.into_iter().map(|(_, path)| path).collect())
 }
+
+#[tauri::command]
+pub fn fuzzy_symbols(
+    workspace_id: String,
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<NavigationTarget>, String> {
+    let max = limit.unwrap_or(50).min(200);
+    let symbols = workspace_symbols(&workspace_id)?;
+    let query_lower = query.to_lowercase();
+
+    let mut scored: Vec<(usize, usize, NavigationTarget)> = Vec::new();
+    for (idx, symbol) in symbols.iter().enumerate() {
+        if !matches!(
+            symbol.kind.as_str(),
+            "function" | "method" | "class" | "interface" | "type" | "constant"
+        ) {
+            continue;
+        }
+        let name_lower = symbol.name.to_lowercase();
+        let score = if query_lower.is_empty() {
+            1
+        } else if name_lower == query_lower {
+            300
+        } else if name_lower.starts_with(&query_lower) {
+            200
+        } else if name_lower.contains(&query_lower) {
+            100
+        } else {
+            // Subsequence fuzzy match
+            let mut qi = 0usize;
+            for ch in name_lower.chars() {
+                if qi < query_lower.len()
+                    && ch == query_lower.chars().nth(qi).unwrap_or('\0')
+                {
+                    qi += query_lower.chars().next().map(|c| c.len_utf8()).unwrap_or(1);
+                }
+            }
+            if qi >= query_lower.len() { 50 } else { continue }
+        };
+        scored.push((
+            score,
+            idx,
+            NavigationTarget {
+                path: symbol.path.clone(),
+                name: symbol.name.clone(),
+                kind: symbol.kind.clone(),
+                start: symbol.start,
+                end: symbol.end,
+                start_line: symbol.start_line + 1,
+                start_column: symbol.start_column + 1,
+            },
+        ));
+        if scored.len() > max * 4 {
+            scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+            scored.truncate(max);
+        }
+    }
+    scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+    scored.truncate(max);
+    Ok(scored.into_iter().map(|(_, _, t)| t).collect())
+}

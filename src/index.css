@@ -514,3 +514,67 @@ html, body, #root { height: 100vh; overflow: hidden; }
   50% { background: rgba(232,93,61,.12); }
   100% { background: rgba(232,93,61,.08); }
 }
+
+
+/* ── Search options bar ── */
+.search-opts {
+  display: flex; align-items: center; gap: 4px;
+  padding: 0 8px 6px;
+}
+.search-opts .opt {
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 3px 8px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.1s ease;
+  min-width: 28px;
+  text-align: center;
+}
+.search-opts .opt.on {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-light);
+}
+.search-opts .opt:hover { border-color: var(--accent); }
+.search-opts .opt-path {
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 3px 8px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 11px;
+  outline: none;
+  min-width: 0;
+}
+.search-opts .opt-path:focus { border-color: var(--accent); background: var(--surface); }
+
+/* ── Fold gutter ── */
+.fold-gutter {
+  display: inline-block;
+  width: 16px;
+  flex-shrink: 0;
+  text-align: center;
+  color: transparent;
+  font-size: 10px;
+  cursor: default;
+  user-select: none;
+  line-height: 1.7;
+}
+.fold-gutter.foldable { color: var(--muted); cursor: pointer; }
+.fold-gutter.foldable:hover { color: var(--accent); }
+.fold-gutter.folded { color: var(--accent); }
+
+/* ── Current line ── */
+.code-line.current-line { background: rgba(232,93,61,.05); }
+
+/* ── Symbol highlight (all occurrences of clicked word) ── */
+.sym-hl {
+  background: rgba(255,193,7,.25);
+  border-radius: 2px;
+  box-shadow: 0 1px 0 rgba(255,193,7,.4);
+}
