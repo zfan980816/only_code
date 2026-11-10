@@ -615,3 +615,34 @@ html, body, #root { height: 100vh; overflow: hidden; }
 }
 
 
+
+
+/* ── Workspace list (persistent sidebar) ── */
+.ws-list { margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border-light); }
+.ws-list-title {
+  font-size: 10px; font-weight: 600; text-transform: uppercase;
+  color: var(--muted); padding: 2px 8px 4px; letter-spacing: 0.04em;
+}
+.ws-row { display: flex; align-items: center; border-radius: 6px; transition: background 0.1s ease; }
+.ws-row:hover { background: var(--surface-2); }
+.ws-row.on { background: var(--accent-light); }
+.ws-open {
+  flex: 1; display: flex; align-items: center; gap: 6px;
+  border: 0; background: transparent; text-align: left;
+  padding: 5px 8px; color: var(--text-secondary);
+  font-size: 12px; font-weight: 500; cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  min-width: 0;
+}
+.ws-row.on .ws-open { color: var(--accent); font-weight: 600; }
+.ws-open:hover { color: var(--text); }
+.ws-icon { font-size: 10px; color: var(--muted); flex-shrink: 0; }
+.ws-row.on .ws-icon { color: var(--accent); }
+.ws-remove {
+  border: 0; background: transparent; color: var(--muted);
+  padding: 2px 8px; font-size: 12px; cursor: pointer;
+  opacity: 0; transition: opacity 0.1s ease;
+  flex-shrink: 0;
+}
+.ws-row:hover .ws-remove { opacity: 1; }
+.ws-remove:hover { color: var(--err); }

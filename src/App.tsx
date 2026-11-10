@@ -17,8 +17,8 @@ interface Tab { path: string; name: string; lang: string; }
 
 type Lang = "zh" | "en";
 const L: Record<Lang, Record<string,string>> = {
-  zh: { open:"打开文件夹",files:"文件",search:"搜索",bookmarks:"书签",noWs:"未打开",outline:"大纲",refs:"引用",defs:"定义",noFile:"未选择文件",noSyms:"无符号",focus:"专注",findRefs:"查找引用",quick:"快速打开文件…",noBm:"无书签",refsFor:"引用",status:"就绪",fileSearch:"文件内搜索…",close:"关闭",goDef:"跳转",popupRefs:"引用处",popupDefs:"定义",noRefsFound:"无引用" },
-  en: { open:"Open Folder",files:"Files",search:"Search",bookmarks:"Bookmarks",noWs:"No workspace",outline:"Outline",refs:"Refs",defs:"Defs",noFile:"No file",noSyms:"No symbols",focus:"Focus",findRefs:"Find Refs",quick:"Quick open file…",noBm:"No bookmarks",refsFor:"Refs",status:"Ready",fileSearch:"Search in file…",close:"Close",goDef:"Go",popupRefs:"Usages",popupDefs:"Definitions",noRefsFound:"No usages" }
+  zh: { workspaces:"工作区",open:"打开文件夹",files:"文件",search:"搜索",bookmarks:"书签",noWs:"未打开",outline:"大纲",refs:"引用",defs:"定义",noFile:"未选择文件",noSyms:"无符号",focus:"专注",findRefs:"查找引用",quick:"快速打开文件…",noBm:"无书签",refsFor:"引用",status:"就绪",fileSearch:"文件内搜索…",close:"关闭",goDef:"跳转",popupRefs:"引用处",popupDefs:"定义",noRefsFound:"无引用" },
+  en: { workspaces:"Workspaces",open:"Open Folder",files:"Files",search:"Search",bookmarks:"Bookmarks",noWs:"No workspace",outline:"Outline",refs:"Refs",defs:"Defs",noFile:"No file",noSyms:"No symbols",focus:"Focus",findRefs:"Find Refs",quick:"Quick open file…",noBm:"No bookmarks",refsFor:"Refs",status:"Ready",fileSearch:"Search in file…",close:"Close",goDef:"Go",popupRefs:"Usages",popupDefs:"Definitions",noRefsFound:"No usages" }
 };
 
 const KW: Record<string, string[]> = {
@@ -157,6 +157,7 @@ export default function App() {
   const [tabView, setTabView] = useState<"files"|"search"|"bookmarks">("files");
   const [err, setErr] = useState<string | null>(null);
   const [bookmarks, setBookmarks] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem("lr-bm") ?? "[]"); } catch { return []; } });
+  const [wsList, setWsList] = useState<Array<{root:string;name:string}>>(() => { try { return JSON.parse(localStorage.getItem("lr-ws-list") ?? "[]"); } catch { return []; } });
   const [refs, setRefs] = useState<NavTarget[]>([]);
   const [defs, setDefs] = useState<NavTarget[]>([]);
   const [refTarget, setRefTarget] = useState("");
@@ -280,16 +281,84 @@ export default function App() {
   }, [ws]);
 
 
-  const openFolder = useCallback(async () => {
+  const openWorkspace = useCallback(async (root: string) => {
     setErr(null);
     try {
-      const sel = await open({ directory: true, multiple: false });
-      if (!sel) return;
-      const w = await call<Ws>("workspace_open", { root: sel });
+      const w = await call<Ws>("workspace_open", { root });
       setWs(w); setTabs([]); setActiveTab(0); setDoc(null); setSyms([]); setResults([]); setSearchQ(""); setRefs([]); setDefs([]);
       setTree([{ name: w.name, path: "", isDir: true }]); setExpanded({});
+      setFoldedLines(new Set()); setHighlightWord(""); setCurrentLine(0); setJumpTarget(null);
       setStatus(`${w.name} · ${w.indexedFiles} indexed`);
-    } catch (e) { const m = String(e); setErr(m); setStatus(`ERR: ${m}`); }
+      setWsList(prev => {
+        const next = [{ root, name: w.name }, ...prev.filter(x => x.root !== root)];
+        localStorage.setItem("lr-ws-list", JSON.stringify(next));
+        return next;
+      });
+      return w;
+    } catch (e) { const m = String(e); setErr(m); setStatus(`ERR: ${m}`); return null; }
+  }, []);
+
+  const removeWorkspace = useCallback((root: string) => {
+    setWsList(prev => {
+      const next = prev.filter(x => x.root !== root);
+      localStorage.setItem("lr-ws-list", JSON.stringify(next));
+      return next;
+    });
+    if (ws?.root === root) {
+      setWs(null); setTabs([]); setActiveTab(0); setDoc(null); setSyms([]); setTree([]);
+      localStorage.removeItem("lr-last-ws"); localStorage.removeItem("lr-last-tabs"); localStorage.removeItem("lr-last-active");
+      setStatus(lang === "zh" ? "工作区已移除" : "Workspace removed");
+    }
+  }, [ws, lang]);
+
+  const openFolder = useCallback(async () => {
+    const sel = await open({ directory: true, multiple: false });
+    if (!sel) return;
+    await openWorkspace(sel);
+  }, [openWorkspace]);
+
+  // Session persistence: save workspace + tabs + active tab
+  useEffect(() => {
+    if (!ws) return;
+    localStorage.setItem("lr-last-ws", ws.root);
+    localStorage.setItem("lr-last-tabs", JSON.stringify(tabs.map(t => t.path)));
+    localStorage.setItem("lr-last-active", String(activeTab));
+  }, [ws, tabs, activeTab]);
+
+  // Session restore: on startup, reopen last workspace + tabs
+  useEffect(() => {
+    const savedWs = localStorage.getItem("lr-last-ws");
+    if (!savedWs) return;
+    (async () => {
+      const w = await openWorkspace(savedWs);
+      if (!w) return;
+      let savedTabs: string[] = [];
+      let savedActive = 0;
+      try {
+        savedTabs = JSON.parse(localStorage.getItem("lr-last-tabs") ?? "[]");
+        savedActive = parseInt(localStorage.getItem("lr-last-active") ?? "0") || 0;
+      } catch {}
+      for (const path of savedTabs) {
+        try {
+          const d = await call<Doc>("file_read", { workspaceId: w.id, path });
+          const name = path.split("/").pop() || path;
+          setTabs(prev => prev.some(tb => tb.path === path) ? prev : [...prev, { path, name, lang: d.language }]);
+        } catch {}
+      }
+      if (savedTabs.length > 0) {
+        const idx = Math.min(savedActive, savedTabs.length - 1);
+        const path = savedTabs[idx];
+        try {
+          const d = await call<Doc>("file_read", { workspaceId: w.id, path });
+          setDoc(d); _inMultiLine = false;
+          try { setSyms(await call<Sym[]>("outline", { workspaceId: w.id, path })); } catch { setSyms([]); }
+          const tabIdx = savedTabs.indexOf(path);
+          setActiveTab(tabIdx >= 0 ? tabIdx : 0);
+          setStatus(`${path} · ${d.language}`);
+        } catch {}
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadDir = useCallback(async (path: string) => {
@@ -715,7 +784,24 @@ export default function App() {
               <button className={tabView==="search"?"on":""} onClick={()=>setTabView("search")}>{t("search")}</button>
               <button className={tabView==="bookmarks"?"on":""} onClick={()=>setTabView("bookmarks")}>{t("bookmarks")} ({bookmarks.length})</button>
             </div>
-            {tabView==="files" && <div className="tree">{renderTree(tree,0)}</div>}
+            {tabView==="files" && (
+              <div className="tree">
+                {wsList.length > 0 && (
+                  <div className="ws-list">
+                    <div className="ws-list-title">{t("workspaces")}</div>
+                    {wsList.map(w => (
+                      <div key={w.root} className={`ws-row ${ws?.root === w.root ? "on" : ""}`}>
+                        <button className="ws-open" onClick={() => openWorkspace(w.root)}>
+                          <span className="ws-icon">▸</span>{w.name}
+                        </button>
+                        <button className="ws-remove" onClick={(e) => { e.stopPropagation(); removeWorkspace(w.root); }} title="移除">×</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {renderTree(tree,0)}
+              </div>
+            )}
             {tabView==="search" && (
               <div className="search-wrap">
                 <input className="search-input" value={searchQ} placeholder="Search..."
@@ -992,6 +1078,9 @@ export default function App() {
     </div>
   );
 }
+
+
+
 
 
 
