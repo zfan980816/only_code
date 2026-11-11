@@ -12,6 +12,8 @@
 - 只读阅读优先，同时支持文件编辑、Ctrl+S 保存、查找替换
 - 新建、重命名、删除文件，左侧树实时同步
 - 文件标签页、文件内搜索、代码缩放、固定行号与当前行高亮
+- 点击标识符，当前文件内所有相同引用自动高亮，状态栏显示匹配数，`F3` / `Shift+F3` 在匹配之间跳转
+- 块注释（`/* */`、JSDoc）与行注释统一着色
 - 浏览历史 Back / Forward，支持跳转后回退和前进
 - Git History：提交图、搜索/Hash 查找、分支/作者/日期/路径过滤、提交详情、变更文件分组和逐文件 diff
 - Git 未提交修改：Working Tree vs HEAD 的文件列表和 diff
@@ -71,8 +73,6 @@ npm run tauri build
 ### 1. 打开代码文件夹
 
 启动应用后，点击左侧 **打开文件夹** 按钮，或把文件夹拖入窗口。也可以在左侧活动栏点击 **文件 → 常用目录** 快速切换。
-
-![打开文件夹](docs/screenshot-open-folder.png)
 
 支持的仓库类型：
 - Git 仓库（自动遵守 `.gitignore`）
@@ -141,6 +141,8 @@ npm run tauri build
 | `Ctrl + S` | 保存当前文件 |
 | `Ctrl + 滚轮` | 代码字体缩放 |
 | `Ctrl + 点击` | 跳转到定义 |
+| `Ctrl + Alt + 点击` | 查找引用 |
+| `F3` / `Shift + F3` | 下一个 / 上一个引用匹配 |
 | `Alt + ←` | 浏览历史后退 |
 | `Alt + →` | 浏览历史前进 |
 
@@ -194,7 +196,7 @@ npm run tauri build
 │                  Tauri 桌面应用                       │
 ├─────────────┬─────────────────────┬─────────────────┤
 │  React UI   │   Tauri IPC 层       │  Rust 后端       │
-│  CodeMirror │  workspace_open     │  文件扫描         │
+│  代码视图    │  workspace_open     │  文件扫描         │
 │  文件树      │  file_tree          │  Tree-sitter     │
 │  搜索面板    │  search             │  符号提取         │
 │  大纲面板    │  resolve_def        │  SQLite 存储     │
@@ -234,9 +236,12 @@ Windows 下缺少 Visual Studio Build Tools。安装 [VS Build Tools](https://vi
 - [x] 全局搜索
 - [x] 跳转到定义
 - [x] 查找引用
-- [x] Git 最近提交 diff 视图
+- [x] 点击标识符全文引用高亮与 F3 导航
+- [x] Git 提交历史与工作区 diff 视图
+- [x] 浏览历史前进 / 后退
+- [ ] 更多语言高亮（Rust / Go / C/C++ / JSON 等）
+- [ ] 文件树 Git 状态标记
 - [ ] 插件系统与可选 LSP
-- [ ] AI 摘要（可选插件）
 
 ## 贡献
 

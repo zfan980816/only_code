@@ -1,8 +1,8 @@
-/* Light Reader — Modern UI inspired by Codex/Cursor aesthetic */
+/* Light Reader — modern light/dark UI */
 * { box-sizing:border-box; margin:0; padding:0; }
 
 :root {
-  /* Warm neutral palette like Codex */
+  /* Warm neutral palette */
   --bg: #F7F8FA;
   --surface: #FFFFFF;
   --surface-2: #F3F5F8;
@@ -685,7 +685,7 @@ html, body, #root { height: 100vh; overflow: hidden; }
 
 
 
-/* ── Sidebar top icon button (Codex style) ── */
+/* ── Sidebar top icon button ── */
 
 .icon-btn {
   border: 0; background: transparent;
@@ -718,7 +718,7 @@ html, body, #root { height: 100vh; overflow: hidden; }
 .sm-linenum { color: var(--muted); margin-right: 8px; font-size: 10.5px; }
 
 
-/* ── Codex-style workspace switcher ── */
+/* ── Workspace switcher ── */
 .left { position: relative; }
 .side-top { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px 6px 12px; }
 .ws-switcher {
@@ -797,7 +797,7 @@ html, body, #root { height: 100vh; overflow: hidden; }
 }
 
 
-/* ── 文件 folder list (Codex 项目 style) ── */
+/* ── Folder list ── */
 .folder-list { padding: 0 8px 12px; }
 .folder-item { margin-bottom: 1px; }
 .folder-row {

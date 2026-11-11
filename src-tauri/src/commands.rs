@@ -281,6 +281,9 @@ fn parse_changed_files(text: &str) -> Vec<GitFileChange> {
     for line in text.lines() {
         let mut fields = line.split('\t');
         let Some(status) = fields.next() else { continue };
+        // Deleted files no longer exist after the commit, so they cannot be
+        // resolved as current paths by the outline/file APIs; exclude them.
+        if status.starts_with('D') { continue; }
         let paths: Vec<&str> = fields.collect();
         if let Some(path) = changed_path(status, &paths) {
             files.push(GitFileChange { path, status: status.to_string() });
@@ -309,6 +312,21 @@ fn parse_commit_record(record: &str) -> Option<GitCommit> {
 }
 
 fn changed_files_for_revision(root: &std::path::Path, rev: &str, include_root: bool) -> Result<Vec<GitFileChange>, String> {
+    // Locale-independent repo check: LC_ALL=C forces English git messages so
+    // "not a git repository" can be matched reliably on any system language.
+    let head = git_command(root)
+        .env("LC_ALL", "C")
+        .args(["rev-parse", "--verify", "--quiet", "HEAD"])
+        .output()
+        .map_err(|e| format!("git 不可用: {e}"))?;
+    if !head.status.success() {
+        let message = git_stderr(&head);
+        return Err(if message.contains("not a git repository") {
+            "此文件夹不是 Git 仓库".to_string()
+        } else {
+            "当前仓库还没有提交".to_string()
+        });
+    }
     ensure_git_commit(root, rev)?;
     let mut args = vec![
         "-c".to_string(), "core.quotepath=false".to_string(), "diff-tree".to_string(),
