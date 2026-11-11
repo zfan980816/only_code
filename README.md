@@ -6,7 +6,7 @@
 
 - 本地工作区管理：打开文件夹、拖拽导入、常用目录、会话恢复
 - 懒加载文件树，支持 `.gitignore`，隐藏/超大/二进制文件安全跳过
-- 语法高亮：JavaScript / TypeScript / TSX / Python / Java
+- 语法高亮：JavaScript / TypeScript / TSX / Python / Java 完整解析，Rust / Go / C / C++ / C# / PHP / Ruby / Kotlin / Swift / Lua / SQL / Shell / JSON / YAML / TOML / CSS / HTML / XML / Vue / Svelte / Markdown 关键词高亮
 - 全文/正则搜索，流式返回结果
 - IDE 风格分组大纲（Imports / Classes / Functions / Constants / Types）、符号搜索、跳转到定义、引用查找
 - 只读阅读优先，同时支持文件编辑、Ctrl+S 保存、查找替换
@@ -175,6 +175,10 @@ npm run tauri build
 | TypeScript / TSX | ✅ Tree-sitter | ✅ 函数/类/方法/接口/类型/常量/导入 | ✅ |
 | Python | ✅ Tree-sitter | ✅ 函数/类/赋值/导入 | ✅ |
 | Java | ✅ Tree-sitter | ✅ 类/方法/接口/枚举/字段/导入 | ✅ |
+| Rust / Go / C / C++ / C# / PHP | ✅ 关键词 | ❌ | ❌ |
+| Ruby / Kotlin / Swift / Lua / SQL / Shell | ✅ 关键词 | ❌ | ❌ |
+| JSON / YAML / TOML / CSS / Markdown | ✅ 关键词 | ❌ | ❌ |
+| HTML / XML / Vue / Svelte | ✅ 标签 | ❌ | ❌ |
 | 其他格式 | 纯文本 | ❌ | ❌ |
 
 ## 技术栈
@@ -239,7 +243,7 @@ Windows 下缺少 Visual Studio Build Tools。安装 [VS Build Tools](https://vi
 - [x] 点击标识符全文引用高亮与 F3 导航
 - [x] Git 提交历史与工作区 diff 视图
 - [x] 浏览历史前进 / 后退
-- [ ] 更多语言高亮（Rust / Go / C/C++ / JSON 等）
+- [x] 更多语言高亮（Rust / Go / C/C++ / JSON / CSS / HTML 等）
 - [ ] 文件树 Git 状态标记
 - [ ] 插件系统与可选 LSP
 

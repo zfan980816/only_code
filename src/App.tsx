@@ -105,6 +105,22 @@ const L: Record<Lang, Record<string,string>> = {
 };
 
 const KW: Record<string, string[]> = {
+  rust: ["fn","let","mut","const","pub","struct","enum","impl","trait","use","mod","match","if","else","for","while","loop","return","self","Self","crate","super","where","async","await","move","ref","dyn","unsafe","as","in","break","continue","true","false","static","type","box","union"],
+  go: ["func","var","const","type","struct","interface","map","chan","go","defer","if","else","for","range","return","package","import","switch","case","default","break","continue","fallthrough","select","goto","nil","true","false","iota","make","new","append","len","cap","panic","recover"],
+  c: ["int","char","float","double","void","long","short","unsigned","signed","struct","union","enum","typedef","static","extern","const","volatile","register","auto","return","if","else","for","while","do","switch","case","default","break","continue","goto","sizeof","include","define","ifndef","endif","pragma"],
+  cpp: ["int","char","float","double","void","long","short","unsigned","signed","struct","union","enum","typedef","static","extern","const","constexpr","return","if","else","for","while","do","switch","case","default","break","continue","goto","sizeof","class","public","private","protected","virtual","override","final","template","typename","namespace","using","new","delete","this","try","catch","throw","operator","friend","inline","explicit","bool","true","false","nullptr","noexcept","auto","include","define","ifndef","endif","pragma"],
+  csharp: ["using","namespace","class","public","private","protected","internal","static","readonly","const","void","int","string","bool","var","new","return","if","else","for","foreach","while","do","switch","case","default","break","continue","try","catch","finally","throw","this","base","null","true","false","async","await","override","virtual","interface","enum","struct","partial","sealed","get","set","value","is","as","in","out","ref","params","yield","lock","using"],
+  json: ["true","false","null"],
+  css: ["important","media","supports","keyframes","import","charset","font-face","page","layer","container","root","apply","theme","utility","variant","property"],
+  sql: ["select","from","where","insert","into","values","update","set","delete","create","table","join","left","right","inner","outer","full","cross","on","group","by","order","limit","offset","having","as","and","or","not","null","is","primary","key","foreign","references","index","view","alter","drop","distinct","union","all","case","when","then","else","end","like","in","exists","between","asc","desc","begin","commit","rollback"],
+  ruby: ["def","end","class","module","if","elsif","else","unless","while","until","for","do","begin","rescue","ensure","raise","yield","return","self","nil","true","false","require","require_relative","attr_accessor","attr_reader","attr_writer","then","case","when","and","or","not","super","puts","lambda","proc","__method__"],
+  php: ["function","class","public","private","protected","static","return","if","else","elseif","foreach","for","while","do","switch","case","default","break","continue","new","echo","print","require","include","require_once","include_once","namespace","use","extends","implements","interface","trait","try","catch","finally","throw","null","true","false","as","instanceof","global","const","abstract","final","fn","match","enum","readonly"],
+  kotlin: ["fun","val","var","class","object","interface","data","sealed","enum","companion","if","else","for","while","when","return","is","in","as","null","true","false","this","super","try","catch","finally","throw","import","package","private","public","internal","protected","override","open","abstract","suspend","lateinit","by","get","set","init","constructor","typealias","inline","reified","operator","vararg"],
+  swift: ["func","let","var","class","struct","enum","protocol","extension","if","else","guard","for","while","repeat","switch","case","default","return","in","is","as","nil","true","false","self","Self","super","try","catch","throw","throws","import","public","private","internal","fileprivate","open","override","init","deinit","static","class","lazy","weak","unowned","where","associatedtype","typealias","some","any","async","await"],
+  yaml: ["true","false","null","yes","no","on","off"],
+  toml: ["true","false"],
+  shell: ["if","then","else","elif","fi","for","while","until","do","done","case","esac","function","return","in","select","time","export","local","readonly","declare","exit","echo","source","alias","unset","shift","trap","eval","exec","set","cd","pushd","popd","jobs","bg","fg","wait","kill"],
+  lua: ["function","local","if","then","else","elseif","end","for","while","do","return","break","repeat","until","and","or","not","nil","true","false","in","self","goto"],
   typescript: ["const","let","var","function","return","if","else","for","while","class","interface","type","enum","import","export","from","extends","implements","public","private","protected","static","async","await","new","this","super","try","catch","finally","throw","typeof","instanceof","in","of","default","switch","case","break","continue","do","yield","readonly","abstract","declare","namespace","as","is","keyof"],
   javascript: ["const","let","var","function","return","if","else","for","while","class","import","export","from","extends","async","await","new","this","super","try","catch","finally","throw","typeof","instanceof","in","of","default","switch","case","break","continue","do","yield"],
   python: ["def","class","return","if","elif","else","for","while","import","from","as","with","try","except","finally","raise","lambda","yield","pass","break","continue","global","in","is","not","and","or","async","await","self","None","True","False"],
@@ -115,10 +131,49 @@ let _inMultiLine = false;
 let _inBlockComment = false;
 const OVERSCAN = 20; // extra lines rendered above/below viewport
 
+// Languages whose line comments start with # / // / --
+const HASH_LANGS = new Set(["python", "ruby", "shell", "yaml", "toml"]);
+const SLASH_LANGS = new Set(["typescript", "javascript", "tsx", "java", "rust", "go", "c", "cpp", "csharp", "php", "kotlin", "swift", "css", "scss", "less"]);
+const MARKUP_LANGS = new Set(["html", "xml", "vue", "svelte"]);
+
 function hl(line: string, lang: string): { text: string; cls: string }[] {
   const r: { text: string; cls: string }[] = [];
   const kws = KW[lang === "tsx" ? "typescript" : lang] || [];
   const trimmed = line.trimStart();
+  const isHash = HASH_LANGS.has(lang);
+  const isSlash = SLASH_LANGS.has(lang);
+  const isLua = lang === "lua";
+
+  // Markdown: headings, quotes, fences, inline code/bold
+  if (lang === "markdown") {
+    if (/^#{1,6}\s/.test(trimmed)) { r.push({ text: line, cls: "hl-type" }); return r; }
+    if (trimmed.startsWith(">")) { r.push({ text: line, cls: "hl-cmt" }); return r; }
+    if (/^(```|~~~)/.test(trimmed)) { r.push({ text: line, cls: "hl-str" }); return r; }
+    const md = /(\*\*[^*]+\*\*)|(`[^`]+`)|(\*[^*]+\*)|(\s+)|(.)/g;
+    let mm: RegExpExecArray | null;
+    while ((mm = md.exec(line)) !== null) {
+      if (mm[1]) r.push({ text: mm[1], cls: "hl-kw" });
+      else if (mm[2]) r.push({ text: mm[2], cls: "hl-str" });
+      else if (mm[3]) r.push({ text: mm[3], cls: "hl-cmt" });
+      else r.push({ text: mm[0], cls: "" });
+    }
+    return r;
+  }
+
+  // Markup: tag names, attributes, strings
+  if (MARKUP_LANGS.has(lang)) {
+    const tag = /(<\/?)|([A-Za-z_][\w:.-]*)(?==)|(\/?>)|("[^"]*"|'[^']*')|(\s+)|(.)/g;
+    let tm: RegExpExecArray | null;
+    let inTag = false;
+    while ((tm = tag.exec(line)) !== null) {
+      if (tm[1]) { inTag = true; r.push({ text: tm[1], cls: "" }); }
+      else if (tm[2] && inTag) r.push({ text: tm[2], cls: "hl-type" });
+      else if (tm[3]) { inTag = false; r.push({ text: tm[3], cls: "" }); }
+      else if (tm[4] && inTag) r.push({ text: tm[4], cls: "hl-str" });
+      else r.push({ text: tm[0], cls: "" });
+    }
+    return r;
+  }
   
   // Multi-line string tracking (docstrings)
   const tripleCount = (line.match(/\"\"\"/g) || []).length;
@@ -146,8 +201,8 @@ function hl(line: string, lang: string): { text: string; cls: string }[] {
     return r;
   }
 
-  // Whole-line comment (starts with # or //)
-  if (trimmed.startsWith("#") || trimmed.startsWith("//")) {
+  // Whole-line comment (# // or lua --)
+  if ((isHash && trimmed.startsWith("#")) || (isSlash && trimmed.startsWith("//")) || (isLua && trimmed.startsWith("--"))) {
     r.push({ text: line, cls: "hl-cmt" });
     return r;
   }
@@ -160,9 +215,10 @@ function hl(line: string, lang: string): { text: string; cls: string }[] {
     const ch = line[i];
     if (inStr) { if (ch === inStr && line[i-1] !== "\\") inStr = null; }
     else if (ch === '"' || ch === "'" || ch === "`") inStr = ch;
-    else if (ch === "#") { commentStart = i; break; }
-    else if (ch === "/" && line[i+1] === "/") { commentStart = i; break; }
-    else if (ch === "/" && line[i+1] === "*") { blockStart = i; break; }
+    else if (isHash && ch === "#") { commentStart = i; break; }
+    else if (isLua && ch === "-" && line[i+1] === "-") { commentStart = i; break; }
+    else if (isSlash && ch === "/" && line[i+1] === "/") { commentStart = i; break; }
+    else if (isSlash && ch === "/" && line[i+1] === "*") { blockStart = i; break; }
   }
   
   // Block comment starts on this line
@@ -1654,6 +1710,25 @@ export default function App() {
                     <option value="tsx">TSX</option>
                     <option value="python">Python</option>
                     <option value="java">Java</option>
+                    <option value="rust">Rust</option>
+                    <option value="go">Go</option>
+                    <option value="c">C</option>
+                    <option value="cpp">C++</option>
+                    <option value="csharp">C#</option>
+                    <option value="json">JSON</option>
+                    <option value="css">CSS</option>
+                    <option value="html">HTML</option>
+                    <option value="xml">XML</option>
+                    <option value="sql">SQL</option>
+                    <option value="ruby">Ruby</option>
+                    <option value="php">PHP</option>
+                    <option value="kotlin">Kotlin</option>
+                    <option value="swift">Swift</option>
+                    <option value="yaml">YAML</option>
+                    <option value="toml">TOML</option>
+                    <option value="shell">Shell</option>
+                    <option value="lua">Lua</option>
+                    <option value="markdown">Markdown</option>
                   </select>
                 </div>
               </div>
