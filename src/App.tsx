@@ -354,6 +354,7 @@ export default function App() {
   const [occurrenceIdx, setOccurrenceIdx] = useState(0);
   const [matchLines, setMatchLines] = useState<number[]>([]);
   const codeRef = useRef<HTMLPreElement>(null);
+  const lastJumpKeyRef = useRef("");
   const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [wsMenuOpen, setWsMenuOpen] = useState(false);
   const [dark, setDark] = useState(() => localStorage.getItem("lr-theme") === "dark");
@@ -439,6 +440,10 @@ export default function App() {
   const fileSearchRef = useRef<HTMLInputElement>(null);
   const symRef = useRef<HTMLInputElement>(null);
   const activeTabRef = useRef<string | undefined>(undefined);
+  // Latest expanded-dirs snapshot for the debounced files_changed reloader
+  const expandedRef = useRef<Record<string, N[]>>({});
+  expandedRef.current = expanded;
+  const reloadTimerRef = useRef<number | null>(null);
   const [navHistory, setNavHistory] = useState<NavHistoryEntry[]>([]);
   const [navIndex, setNavIndex] = useState(-1);
   const navHistoryRef = useRef<NavHistoryEntry[]>([]);
@@ -536,6 +541,27 @@ export default function App() {
   useEffect(() => {
     if (!ws) return;
     const unsubs: Array<() => void> = [];
+    // Reload expanded dirs, git badges and the active doc after file changes.
+    const reloadNow = async () => {
+      // Reload every currently expanded directory, not just the workspace root,
+      // otherwise newly created files in an open folder never appear.
+      const next: Record<string, N[]> = {};
+      try { next[""] = await call<N[]>("file_tree", { workspaceId: ws.id }); } catch {}
+      for (const dir of Object.keys(expandedRef.current).filter(d => d)) {
+        try { next[dir] = await call<N[]>("file_tree", { workspaceId: ws.id, path: dir }); } catch {}
+      }
+      setExpanded(prev => ({ ...next, ...(Object.keys(prev).length ? {} : prev) }));
+      // Keep file-tree git badges in sync with the working tree
+      try { setWorkingFiles(await call<GitFileChange[]>("git_working_changes", { workspaceId: ws.id })); } catch { setWorkingFiles([]); }
+      if (activeTabRef.current) {
+        try {
+          const d = await call<Doc>("file_read", { workspaceId: ws.id, path: activeTabRef.current });
+          // Same content -> keep the old doc object so the scroll position
+          // and derived memos are untouched.
+          setDoc(prev => (prev && prev.path === d.path && prev.content === d.content ? prev : d));
+        } catch {}
+      }
+    };
     const setup = async () => {
       unsubs.push(await listen<SRes["results"]>("search_batch", (ev) => {
         if (!Array.isArray(ev.payload)) return;
@@ -549,27 +575,10 @@ export default function App() {
           return [...map.values()];
         });
       }));
-      unsubs.push(await listen<string>("files_changed", async () => {
-        // Reload every currently expanded directory, not just the workspace root,
-        // otherwise newly created files in an open folder never appear.
-        setExpanded(prev => {
-          const dirs = Object.keys(prev);
-          (async () => {
-            const next: Record<string, N[]> = { ...prev };
-            try { next[""] = await call<N[]>("file_tree", { workspaceId: ws.id }); } catch {}
-            for (const dir of dirs.filter(d => d)) {
-              try { next[dir] = await call<N[]>("file_tree", { workspaceId: ws.id, path: dir }); } catch {}
-            }
-            setExpanded(next);
-            // Keep file-tree git badges in sync with the working tree
-            try { setWorkingFiles(await call<GitFileChange[]>("git_working_changes", { workspaceId: ws.id })); } catch { setWorkingFiles([]); }
-          })();
-          return prev;
-        });
-        if (activeTabRef.current) {
-          call<Doc>("file_read", { workspaceId: ws.id, path: activeTabRef.current })
-            .then(d => setDoc(d)).catch(() => {});
-        }
+      // Watcher events arrive in bursts (builds, LSP, saves); coalesce them.
+      unsubs.push(await listen<string>("files_changed", () => {
+        if (reloadTimerRef.current !== null) clearTimeout(reloadTimerRef.current);
+        reloadTimerRef.current = setTimeout(() => { reloadTimerRef.current = null; reloadNow(); }, 600);
       }));
       unsubs.push(await listen<{ indexedFiles: number }>("index_progress", (ev) => {
         if (ev.payload?.indexedFiles !== undefined) {
@@ -578,7 +587,10 @@ export default function App() {
       }));
     };
     setup();
-    return () => unsubs.forEach(fn => { try { fn(); } catch {} });
+    return () => {
+      unsubs.forEach(fn => { try { fn(); } catch {} });
+      if (reloadTimerRef.current !== null) clearTimeout(reloadTimerRef.current);
+    };
   }, [ws]);
 
 
@@ -1503,6 +1515,11 @@ export default function App() {
   useEffect(() => {
     if (!jumpTarget || !doc || !codeRef.current) return;
     if (jumpTarget.path !== activeTabData?.path) return;
+    // Only scroll when the target (file/line) actually changed. Reloads that
+    // merely recreate the doc/codeLines objects must NOT yank the viewport.
+    const key = `${doc.path}|${jumpTarget.line}`;
+    if (lastJumpKeyRef.current === key) return;
+    lastJumpKeyRef.current = key;
     const timer = setTimeout(() => {
       const codeEl = codeRef.current;
       if (!codeEl) return;
