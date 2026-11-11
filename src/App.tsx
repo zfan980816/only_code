@@ -78,9 +78,11 @@ interface Tab { path: string; name: string; lang: string; }
 interface Prefs {
   lineSpacing: number;
   codeFont: "default" | "consolas" | "jetbrains";
+  lspEnabled: boolean;
 }
 
 const DEFAULT_PREFS: Prefs = {
+  lspEnabled: true,
   lineSpacing: 1.7,
   codeFont: "default",
 };
@@ -416,6 +418,10 @@ export default function App() {
   const [scrollTop, setScrollTop] = useState(0);
   const [codeFontSize, setCodeFontSize] = useState<number>(() => { const v = parseInt(localStorage.getItem("lr-font-size") ?? "13"); return v >= 9 && v <= 32 ? v : 13; });
   const [prefs, setPrefs] = useState<Prefs>(readPrefs);
+  const [lspCmds, setLspCmds] = useState<Record<string, string>>(() => {
+    try { return JSON.parse(localStorage.getItem("lr-lsp-cmds") ?? "{}"); } catch { return {}; }
+  });
+  useEffect(() => { localStorage.setItem("lr-lsp-cmds", JSON.stringify(lspCmds)); }, [lspCmds]);
   const setPref = useCallback(<K extends keyof Prefs>(key: K, value: Prefs[K]) => setPrefs(prev => ({ ...prev, [key]: value })), []);
   const codeLineH = Math.round(codeFontSize * prefs.lineSpacing);
   const editLines = useMemo(() => {
@@ -1083,23 +1089,55 @@ export default function App() {
     setCurrentLine(lineIdx + 1);
     setHighlightWord(word); setOccurrenceIdx(0);
 
-    // Ctrl+Alt+Click: Find Usages (IDEA style)
+    // LSP server command override for this file's language (empty = auto-detect)
+    const lspCommand = (): string | undefined => {
+      try {
+        const m = JSON.parse(localStorage.getItem("lr-lsp-cmds") ?? "{}");
+        const v = m[doc.language];
+        return typeof v === "string" && v.trim() ? v.trim() : undefined;
+      } catch { return undefined; }
+    };
+
+    // Ctrl+Alt+Click: Find Usages (IDEA style) — LSP first, static index fallback
     if (e.ctrlKey && e.altKey) {
       e.preventDefault();
-      try {
-        const targets = await call<NavTarget[]>("find_references", { workspaceId: ws.id, name: word });
-        setRefPopup({ x: e.clientX, y: e.clientY, name: word, targets });
-      } catch (err) {
-        setStatus(lang === "zh" ? `引用查找失败：${err}` : `Find references failed: ${err}`);
+      let targets: NavTarget[] | null = null;
+      if (prefs.lspEnabled) {
+        try {
+          targets = await call<NavTarget[]>("lsp_references", {
+            workspaceId: ws.id, path: activeTabData.path, line: lineIdx, column: charIdx,
+            command: lspCommand(), name: word,
+          });
+        } catch { targets = null; }
       }
+      if (!targets || targets.length === 0) {
+        try {
+          targets = await call<NavTarget[]>("find_references", { workspaceId: ws.id, name: word });
+        } catch (err) {
+          setStatus(lang === "zh" ? `引用查找失败：${err}` : `Find references failed: ${err}`);
+          return;
+        }
+      }
+      setRefPopup({ x: e.clientX, y: e.clientY, name: word, targets });
       return;
     }
 
-    // Ctrl+Click / Cmd+Click: Go to Definition (IDEA style)
+    // Ctrl+Click / Cmd+Click: Go to Definition (IDEA style) — LSP first, static index fallback
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault();
+      let lspTargets: NavTarget[] | null = null;
+      if (prefs.lspEnabled) {
+        try {
+          lspTargets = await call<NavTarget[]>("lsp_definition", {
+            workspaceId: ws.id, path: activeTabData.path, line: lineIdx, column: charIdx,
+            command: lspCommand(), name: word,
+          });
+        } catch { lspTargets = null; }
+      }
       try {
-        const targets = await call<NavTarget[]>("goto_definition", { workspaceId: ws.id, name: word, currentPath: activeTabData.path });
+        const targets = lspTargets && lspTargets.length > 0
+          ? lspTargets
+          : await call<NavTarget[]>("goto_definition", { workspaceId: ws.id, name: word, currentPath: activeTabData.path });
         if (targets.length === 1) {
           openFile(targets[0].path, targets[0].startLine);
         } else if (targets.length > 1) {
@@ -1120,7 +1158,7 @@ export default function App() {
     }
 
     // Ordinary clicks only move the logical cursor, exactly like IDEA.
-  }, [ws, activeTabData, doc, openFile, getWordAtClick, lang]);
+  }, [ws, activeTabData, doc, openFile, getWordAtClick, lang, prefs]);
 
   // File search matches
   const searchMatches = useMemo(() => {
@@ -1596,6 +1634,31 @@ export default function App() {
                         <option value="jetbrains">JetBrains Mono</option>
                       </select>
                     </div>
+                  </div>
+
+                  <div className="settings-section">
+                    <div className="settings-section-title">精确跳转 (LSP)</div>
+                    <div className="settings-row">
+                      <div className="settings-label"><span>语言服务器</span><small>检测到 LSP 时优先使用，失败自动回退到内置解析</small></div>
+                      <div className="settings-segment">
+                        <button className={!prefs.lspEnabled ? "on" : ""} onClick={() => setPref("lspEnabled", false)}>关闭</button>
+                        <button className={prefs.lspEnabled ? "on" : ""} onClick={() => setPref("lspEnabled", true)}>开启</button>
+                      </div>
+                    </div>
+                    {prefs.lspEnabled && (
+                      <div className="settings-row">
+                        <div className="settings-label"><span>服务器命令</span><small>留空自动检测（rust-analyzer / pyright / gopls / clangd…）</small></div>
+                        <div className="lsp-cmd-grid">
+                          {([["rust","Rust"],["python","Python"],["go","Go"],["c","C"],["cpp","C++"],["typescript","TypeScript"],["java","Java"]] as [string,string][]).map(([key, label]) => (
+                            <label key={key} className="lsp-cmd-row">
+                              <span>{label}</span>
+                              <input value={lspCmds[key] || ""} placeholder="自动检测" spellCheck={false}
+                                onChange={e => setLspCmds(prev => ({ ...prev, [key]: e.target.value }))} />
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                 </div>

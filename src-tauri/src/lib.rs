@@ -2,6 +2,7 @@ pub mod commands;
 pub mod db;
 pub mod fs_util;
 pub mod indexer;
+pub mod lsp;
 pub mod language;
 pub mod models;
 pub mod search;
@@ -36,8 +37,16 @@ pub fn run() {
             commands::find_references,
             commands::goto_definition,
             commands::fuzzy_files,
-            commands::fuzzy_symbols
+            commands::fuzzy_symbols,
+            lsp::lsp_definition,
+            lsp::lsp_references,
+            lsp::lsp_stop
         ])
+        .on_window_event(|_window, event| {
+            if let tauri::WindowEvent::Destroyed = event {
+                lsp::stop_all();
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running Light Reader");
 }

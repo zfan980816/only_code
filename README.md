@@ -9,6 +9,7 @@
 - 语法高亮：JavaScript / TypeScript / TSX / Python / Java 完整解析，Rust / Go / C / C++ / C# / PHP / Ruby / Kotlin / Swift / Lua / SQL / Shell / JSON / YAML / TOML / CSS / HTML / XML / Vue / Svelte / Markdown 关键词高亮
 - 全文/正则搜索，流式返回结果
 - IDE 风格分组大纲（Imports / Classes / Functions / Constants / Types）、符号搜索、跳转到定义、引用查找
+- **LSP 精确跳转（可选）**：自动检测 rust-analyzer / pyright / gopls / clangd 等语言服务器，跳转和引用查找达到 IDE 级精度，未安装时自动回退内置解析
 - 只读阅读优先，同时支持文件编辑、Ctrl+S 保存、查找替换
 - 新建、重命名、删除文件，左侧树实时同步
 - 文件标签页、文件内搜索、代码缩放、固定行号与当前行高亮
@@ -106,9 +107,11 @@ npm run tauri build
 
 在代码视图中，**Ctrl + 点击**（macOS 上 **⌘ + 点击**）任意标识符：
 
-- 自动查找该符号在项目中的定义位置
+- 优先使用 LSP 语言服务器精确解析（如已安装并启用）
+- 回退到内置 Tree-sitter 符号索引
 - 跳转到定义所在文件和行
-- 右侧 Definitions 面板显示所有匹配的定义
+- 多个匹配时弹出选择列表
+- **Ctrl + Alt + 点击** 查找引用，同样优先 LSP
 
 ### 5. 查看文件大纲
 
@@ -167,6 +170,23 @@ npm run tauri build
 - 查看 Working Tree vs HEAD 的 diff
 - 新文件会以新增行形式显示
 
+## LSP 语言服务器（可选）
+
+在 **设置 → 精确跳转 (LSP)** 中开启后，跳转到定义和查找引用会优先使用 LSP 解析，精度等同 IDE。
+
+| 语言 | 服务器 | 自动检测 |
+|------|--------|----------|
+| Rust | rust-analyzer | ✅ |
+| Python | pyright-langserver | ✅ |
+| Go | gopls | ✅ |
+| C / C++ | clangd | ✅ |
+| TypeScript / JavaScript | typescript-language-server | ✅ |
+| Java | jdtls | ✅ |
+
+- 服务器未安装时自动回退到内置解析，无需任何配置
+- 想用其他服务器（如 pylsp、vscode-html-language-server）时，在设置中填入启动命令即可
+- 语言服务器进程按工作区惰性启动，关闭窗口自动退出
+
 ## 支持的语言
 
 | 语言 | 语法高亮 | 符号提取 | 跳转 |
@@ -192,6 +212,7 @@ npm run tauri build
 | 语法解析 | Tree-sitter |
 | 持久化 | SQLite (rusqlite) |
 | 文件监听 | notify |
+| 精确跳转 | LSP 客户端（stdio JSON-RPC，可选） |
 
 ## 架构概览
 
@@ -245,7 +266,8 @@ Windows 下缺少 Visual Studio Build Tools。安装 [VS Build Tools](https://vi
 - [x] 浏览历史前进 / 后退
 - [x] 更多语言高亮（Rust / Go / C/C++ / JSON / CSS / HTML 等）
 - [x] 文件树 Git 状态标记（修改/新增角标，目录包含变更时显示圆点）
-- [ ] 插件系统与可选 LSP
+- [x] 可选 LSP 精确跳转（rust-analyzer / clangd / gopls / pyright 自动检测）
+- [ ] 插件系统
 
 ## 贡献
 
