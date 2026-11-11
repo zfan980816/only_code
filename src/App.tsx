@@ -592,6 +592,10 @@ export default function App() {
   const activeTabData = tabs[activeTab];
   activeTabRef.current = activeTabData?.path;
   const gitGraph = useMemo(() => computeGitGraph(gitCommits), [gitCommits]);
+  const gitDiffLines = useMemo(() => gitDiff ? gitDiff.split("\n").slice(0, 2500) : [], [gitDiff]);
+  const gitDiffTruncated = useMemo(() => gitDiff ? gitDiff.split("\n").length > 2500 : false, [gitDiff]);
+  const workingDiffLines = useMemo(() => workingDiff ? workingDiff.split("\n").slice(0, 2500) : [], [workingDiff]);
+  const workingDiffTruncated = useMemo(() => workingDiff ? workingDiff.split("\n").length > 2500 : false, [workingDiff]);
   const gitAuthors = useMemo(() => [...new Set(gitCommits.map(c => c.authorName).filter(Boolean))].sort((a,b)=>a.localeCompare(b)), [gitCommits]);
   const openFile = useCallback(async (path: string, targetLine?: number) => {
     if (!ws) return;
@@ -1867,9 +1871,11 @@ export default function App() {
                 ) : <div className="ref-popup-empty">{gitDetailLoading ? "加载提交详情…" : "选择一个提交"}</div>}
                 <div className="git-diff-view">
                   {gitFile ? <div className="git-diff-file">{gitFile}</div> : null}
-                  {gitDiff ? gitDiff.split("\n").map((line, i) => (
+                  {gitDiffLines.map((line, i) => (
                     <div key={i} className={"diff-line " + (line.startsWith("+") && !line.startsWith("+++") ? "add" : line.startsWith("-") && !line.startsWith("---") ? "del" : line.startsWith("@@") ? "hunk" : "")}>{line || " "}</div>
-                  )) : <div className="ref-popup-empty">{gitDetailLoading ? "加载差异…" : "选择变更文件"}</div>}
+                  ))}
+                {gitDiffTruncated && <div className="diff-truncated">差异过长，仅显示前 2500 行</div>}
+                {!gitDiff && <div className="ref-popup-empty">{gitDetailLoading ? "加载差异…" : "选择变更文件"}</div>}
                 </div>
               </div>
 
@@ -1902,9 +1908,11 @@ export default function App() {
               </div>
               <div className="git-diff git-diff-view">
                 {workingSel ? <div className="git-diff-file">{workingSel}</div> : null}
-                {workingDiff ? workingDiff.split("\n").map((line, i) => (
+                {workingDiffLines.map((line, i) => (
                   <div key={i} className={"diff-line " + (line.startsWith("+") && !line.startsWith("+++") ? "add" : line.startsWith("-") && !line.startsWith("---") ? "del" : line.startsWith("@@") ? "hunk" : "")}>{line || " "}</div>
-                )) : <div className="ref-popup-empty">选择文件查看未提交差异</div>}
+                ))}
+                {workingDiffTruncated && <div className="diff-truncated">差异过长，仅显示前 2500 行</div>}
+                {!workingDiff && <div className="ref-popup-empty">选择文件查看未提交差异</div>}
               </div>
             </div>
             )}

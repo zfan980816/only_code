@@ -237,6 +237,14 @@ pub fn file_rename(workspace_id: String, old_path: String, new_path: String) -> 
 fn git_command(root: &std::path::Path) -> Command {
     let mut command = Command::new("git");
     command.current_dir(root);
+    // Git.exe is a console program on Windows. Without CREATE_NO_WINDOW every
+    // Git action flashes a console window and makes history clicks feel slow.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
     command
 }
 
@@ -392,7 +400,7 @@ pub fn git_log_in(root: &std::path::Path, options: &GitLogOptions) -> Result<Vec
     let format = "%H%x1f%h%x1f%s%x1f%b%x1f%an%x1f%ae%x1f%at%x1f%D%x1f%P%x1e";
     let mut args = vec![
         "-c".to_string(), "core.quotepath=false".to_string(), "log".to_string(),
-        "--no-color".to_string(), "--date=unix".to_string(), "--topo-order".to_string(),
+        "--no-color".to_string(), "--date=unix".to_string(),
         format!("--pretty=format:{}", format),
         format!("--max-count={}", options.limit.clamp(1, 1000)),
     ];
