@@ -1540,3 +1540,7 @@ html, body, #root { height: 100vh; overflow: hidden; }
 .git-working-body .git-diff-view { padding-top: 0; }
 
 .diff-truncated { padding: 8px 14px; color: var(--warn); background: rgba(217,119,6,.10); border-top: 1px solid rgba(217,119,6,.22); font-size: 11px; }
+
+.nav-btn { font-size: 11px; padding: 2px 7px; border-radius: 5px; }
+.nav-btn:disabled { opacity: .35; cursor: default; }
+.nav-btn:not(:disabled):hover { color: var(--accent); background: var(--accent-light); }

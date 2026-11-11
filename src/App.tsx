@@ -16,6 +16,7 @@ interface GitBranch { name: string; fullName: string; kind: string; isCurrent: b
 interface GitCommit { hash: string; shortHash: string; subject: string; body: string; authorName: string; authorEmail: string; timestamp: number; refs: string; parents: string[]; }
 interface GitFileChange { path: string; status: string; }
 interface GitCommitDetail { commit: GitCommit; files: GitFileChange[]; }
+interface NavHistoryEntry { path: string; line: number; }
 
 function groupChangedFiles(files: GitFileChange[]) {
   const groups = new Map<string, GitFileChange[]>();
@@ -330,6 +331,11 @@ export default function App() {
   const fileSearchRef = useRef<HTMLInputElement>(null);
   const symRef = useRef<HTMLInputElement>(null);
   const activeTabRef = useRef<string | undefined>(undefined);
+  const [navHistory, setNavHistory] = useState<NavHistoryEntry[]>([]);
+  const [navIndex, setNavIndex] = useState(-1);
+  const navHistoryRef = useRef<NavHistoryEntry[]>([]);
+  const navIndexRef = useRef(-1);
+  const navigatingRef = useRef(false);
   const gitFilterInit = useRef(false);
 
   // Keyboard shortcuts
@@ -588,12 +594,14 @@ export default function App() {
   const workingDiffLines = useMemo(() => workingDiff ? workingDiff.split("\n").slice(0, 2500) : [], [workingDiff]);
   const workingDiffTruncated = useMemo(() => workingDiff ? workingDiff.split("\n").length > 2500 : false, [workingDiff]);
   const gitAuthors = useMemo(() => [...new Set(gitCommits.map(c => c.authorName).filter(Boolean))].sort((a,b)=>a.localeCompare(b)), [gitCommits]);
-  const openFile = useCallback(async (path: string, targetLine?: number) => {
+  const openFile = useCallback(async (path: string, targetLine?: number, options?: { fromHistory?: boolean }) => {
     if (!ws) return;
+    const sameFile = activeTabData?.path === path;
+    const target = targetLine ?? (sameFile ? (currentLine || 1) : 1);
     try {
       setErr(null); setStatus(`Loading...`);
       const d = await call<Doc>("file_read", { workspaceId: ws.id, path });
-      setDoc(d); setRefs([]); setDefs([]); setFileSearch(""); setFileSearchVisible(false); setCursor({line:1,col:1}); _inMultiLine = false; setEditing(false);
+      setDoc(d); setRefs([]); setDefs([]); setFileSearch(""); setFileSearchVisible(false); setCursor({line:target,col:1}); setCurrentLine(target); _inMultiLine = false; setEditing(false);
       const name = path.split("/").pop() || path;
       setTabs(prev => {
         if (prev.some(tb => tb.path === path)) return prev;
@@ -603,13 +611,76 @@ export default function App() {
       setActiveTab(existingIdx >= 0 ? existingIdx : tabs.length);
       try { setSyms(await call<Sym[]>("outline", { workspaceId: ws.id, path })); } catch { setSyms([]); }
       setStatus(`${path} · ${d.language}`);
-      if (targetLine !== undefined) {
-        setJumpTarget({ path, line: targetLine });
-      } else {
-        setJumpTarget(null);
+      setJumpTarget({ path, line: target });
+
+      if (!options?.fromHistory) {
+        const previous: NavHistoryEntry | undefined = activeTabData?.path
+          ? { path: activeTabData.path, line: currentLine || 1 }
+          : undefined;
+        let stack = [...navHistoryRef.current];
+        let index = navIndexRef.current;
+        if (index < 0) {
+          stack = previous ? [previous] : [];
+          index = previous ? 0 : -1;
+        } else if (previous && stack[index]?.path === previous.path) {
+          stack[index] = previous;
+        }
+        const top = stack[index];
+        if (!top || top.path !== path || top.line !== target) {
+          stack = stack.slice(0, index + 1);
+          stack.push({ path, line: target });
+          index = stack.length - 1;
+        }
+        if (stack.length > 300) stack = stack.slice(stack.length - 300);
+        navHistoryRef.current = stack;
+        navIndexRef.current = index;
+        setNavHistory(stack);
+        setNavIndex(index);
       }
     } catch (e) { const m = String(e); setErr(m); setStatus(`ERR: ${m}`); }
-  }, [ws, tabs]);
+  }, [ws, tabs, activeTabData, currentLine, navHistoryRef, navIndexRef]);
+
+  const navigateHistory = useCallback(async (direction: "back" | "forward") => {
+    const stack = navHistoryRef.current;
+    const currentIndex = navIndexRef.current;
+    const targetIndex = direction === "back" ? currentIndex - 1 : currentIndex + 1;
+    const target = stack[targetIndex];
+    if (!target) return;
+
+    // Preserve the exact line that is leaving before moving through history.
+    const current = stack[currentIndex];
+    if (current && activeTabData?.path === current.path) {
+      stack[currentIndex] = { path: current.path, line: currentLine || 1 };
+      navHistoryRef.current = stack;
+    }
+
+    navigatingRef.current = true;
+    navIndexRef.current = targetIndex;
+    setNavIndex(targetIndex);
+    try {
+      await openFile(target.path, target.line, { fromHistory: true });
+    } finally {
+      setTimeout(() => { navigatingRef.current = false; }, 120);
+    }
+  }, [activeTabData, currentLine, openFile]);
+
+  // History is workspace-local.
+  useEffect(() => {
+    navHistoryRef.current = [];
+    navIndexRef.current = -1;
+    setNavHistory([]);
+    setNavIndex(-1);
+  }, [ws?.id]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!e.altKey) return;
+      if (e.key === "ArrowLeft") { e.preventDefault(); navigateHistory("back"); }
+      if (e.key === "ArrowRight") { e.preventDefault(); navigateHistory("forward"); }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [navigateHistory]);
 
   const switchTab = useCallback(async (idx: number) => {
     if (!ws || !tabs[idx]) return;
@@ -1474,6 +1545,12 @@ export default function App() {
               <div className="doc-hdr">
                 <span>{activeTabData?.path}{editing && editContent !== doc?.content ? " •未保存" : ""}</span>
                 <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                  {!editing && (
+                    <>
+                      <button className="btn-mini nav-btn" disabled={navIndex <= 0} onClick={() => navigateHistory("back")} title="Back (Alt+←)">← Back</button>
+                      <button className="btn-mini nav-btn" disabled={navIndex < 0 || navIndex >= navHistory.length - 1} onClick={() => navigateHistory("forward")} title="Forward (Alt+→)">Forward →</button>
+                    </>
+                  )}
                   {!editing && <button className="btn-mini" onClick={startEdit}>编辑</button>}
                   {editing && <button className="btn-mini save" onClick={saveEdit}>保存</button>}
                   {editing && <button className="btn-mini" onClick={cancelEdit}>取消</button>}
