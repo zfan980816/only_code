@@ -12,6 +12,65 @@ interface N { name: string; path: string; isDir: boolean; }
 interface Doc { path: string; name: string; language: string; content: string; size: number; truncated: boolean; }
 interface Sym { name: string; kind: string; path: string; start: number; end: number; startLine: number; startColumn: number; endLine: number; endColumn: number; }
 interface NavTarget { path: string; name: string; kind: string; start: number; startLine: number; }
+interface GitBranch { name: string; fullName: string; kind: string; isCurrent: boolean; }
+interface GitCommit { hash: string; shortHash: string; subject: string; body: string; authorName: string; authorEmail: string; timestamp: number; refs: string; parents: string[]; }
+interface GitFileChange { path: string; status: string; }
+interface GitCommitDetail { commit: GitCommit; files: GitFileChange[]; }
+
+function groupChangedFiles(files: GitFileChange[]) {
+  const groups = new Map<string, GitFileChange[]>();
+  for (const file of files) {
+    const dir = file.path.includes("/") ? file.path.slice(0, file.path.lastIndexOf("/")) : ".";
+    const list = groups.get(dir) || [];
+    list.push(file);
+    groups.set(dir, list);
+  }
+  return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
+}
+
+interface GitGraphEdge { from: number; to: number; }
+interface GitGraphRow { lane: number; edges: GitGraphEdge[]; verticals: number[]; }
+
+function computeGitGraph(commits: GitCommit[]): { rows: GitGraphRow[]; maxLane: number } {
+  const heads: Array<{ hash: string; lane: number }> = [];
+  const rows: GitGraphRow[] = [];
+  let maxLane = 0;
+  const smallestFree = () => {
+    const used = new Set(heads.map(h => h.lane));
+    let lane = 0;
+    while (used.has(lane)) lane++;
+    return lane;
+  };
+
+  for (const commit of commits) {
+    const consumed = heads.find(h => h.hash === commit.hash);
+    const lane = consumed ? consumed.lane : smallestFree();
+    if (consumed) heads.splice(heads.indexOf(consumed), 1);
+
+    const edges: GitGraphEdge[] = [];
+    commit.parents.forEach((parent, index) => {
+      const existing = heads.find(h => h.hash === parent);
+      if (existing) {
+        edges.push({ from: lane, to: existing.lane });
+        maxLane = Math.max(maxLane, existing.lane);
+        return;
+      }
+      const nextLane = index === 0 ? lane : smallestFree();
+      heads.push({ hash: parent, lane: nextLane });
+      edges.push({ from: lane, to: nextLane });
+      maxLane = Math.max(maxLane, nextLane);
+    });
+
+    const verticals = [...new Set([lane, ...heads.map(h => h.lane)])];
+    maxLane = Math.max(maxLane, ...verticals);
+    rows.push({ lane, edges, verticals });
+  }
+  return { rows, maxLane };
+}
+
+function gitRefBadges(refs: string) {
+  return refs.split(",").map(v => v.trim()).filter(Boolean).map(v => v.replace(/^HEAD\s*->\s*/, ""));
+}
 interface SRes { results: { path: string; name: string; matches: { line: number; text: string }[] }[]; truncated: boolean; filesSearched: number; }
 interface Tab { path: string; name: string; lang: string; }
 
@@ -194,10 +253,21 @@ export default function App() {
   const [wsMenuOpen, setWsMenuOpen] = useState(false);
   const [dark, setDark] = useState(() => localStorage.getItem("lr-theme") === "dark");
   const [gitOpen, setGitOpen] = useState(false);
-  const [gitFiles, setGitFiles] = useState<Array<{path:string;status:string}>>([]);
-  const [gitDiff, setGitDiff] = useState("");
-  const [gitSel, setGitSel] = useState("");
   const [gitError, setGitError] = useState("");
+  const [gitLoading, setGitLoading] = useState(false);
+  const [gitDetailLoading, setGitDetailLoading] = useState(false);
+  const [gitCommits, setGitCommits] = useState<GitCommit[]>([]);
+  const [gitBranches, setGitBranches] = useState<GitBranch[]>([]);
+  const [gitBranch, setGitBranch] = useState("");
+  const [gitAllBranches, setGitAllBranches] = useState(false);
+  const [gitQuery, setGitQuery] = useState("");
+  const [gitAuthor, setGitAuthor] = useState("");
+  const [gitDateRange, setGitDateRange] = useState("all");
+  const [gitPath, setGitPath] = useState("");
+  const [gitSelected, setGitSelected] = useState("");
+  const [gitDetail, setGitDetail] = useState<GitCommitDetail | null>(null);
+  const [gitFile, setGitFile] = useState("");
+  const [gitDiff, setGitDiff] = useState("");
   const [newFileOpen, setNewFileOpen] = useState(false);
   const [newFileName, setNewFileName] = useState("");
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
@@ -255,6 +325,7 @@ export default function App() {
   const fileSearchRef = useRef<HTMLInputElement>(null);
   const symRef = useRef<HTMLInputElement>(null);
   const activeTabRef = useRef<string | undefined>(undefined);
+  const gitFilterInit = useRef(false);
 
   // Keyboard shortcuts
   // Resizable panels
@@ -506,6 +577,8 @@ export default function App() {
 
   const activeTabData = tabs[activeTab];
   activeTabRef.current = activeTabData?.path;
+  const gitGraph = useMemo(() => computeGitGraph(gitCommits), [gitCommits]);
+  const gitAuthors = useMemo(() => [...new Set(gitCommits.map(c => c.authorName).filter(Boolean))].sort((a,b)=>a.localeCompare(b)), [gitCommits]);
   const openFile = useCallback(async (path: string, targetLine?: number) => {
     if (!ws) return;
     try {
@@ -620,16 +693,75 @@ export default function App() {
     return () => window.removeEventListener("keydown", h);
   }, [editing, saveEdit]);
   
+  const gitSince = useCallback(() => {
+    if (gitDateRange === "all") return "";
+    const now = new Date();
+    const days = gitDateRange === "today" ? 0 : gitDateRange === "7" ? 7 : gitDateRange === "30" ? 30 : 365;
+    const date = new Date(now);
+    if (gitDateRange === "today") date.setHours(0, 0, 0, 0); else date.setDate(date.getDate() - days);
+    return date.toISOString();
+  }, [gitDateRange]);
+
+  const loadCommitDetail = useCallback(async (hash: string, selectFile?: string) => {
+    if (!ws || !hash) return;
+    setGitDetailLoading(true); setGitError("");
+    try {
+      const detail = await call<GitCommitDetail>("git_commit_detail", { workspaceId: ws.id, hash });
+      setGitDetail(detail); setGitFile(""); setGitDiff("");
+      if (selectFile || detail.files.length > 0) {
+        const path = selectFile || detail.files[0].path;
+        setGitFile(path);
+        setGitDiff(await call<string>("git_commit_file_diff", { workspaceId: ws.id, hash, path }));
+      }
+    } catch (e) { setGitError(String(e)); setGitDetail(null); }
+    finally { setGitDetailLoading(false); }
+  }, [ws]);
+
+  const loadGitLog = useCallback(async (autoSelect = true) => {
+    if (!ws) return;
+    setGitLoading(true); setGitError("");
+    try {
+      const options = {
+        query: gitQuery, branch: gitAllBranches ? "" : gitBranch,
+        author: gitAuthor, since: gitSince(), until: "", path: gitPath,
+        allBranches: gitAllBranches, limit: 300,
+      };
+      const commits = await call<GitCommit[]>("git_log", { workspaceId: ws.id, options });
+      setGitCommits(commits);
+      if (autoSelect) {
+        const first = commits[0];
+        if (first) { setGitSelected(first.hash); await loadCommitDetail(first.hash); }
+        else { setGitSelected(""); setGitDetail(null); setGitFile(""); setGitDiff(""); }
+      }
+    } catch (e) { setGitError(String(e)); setGitCommits([]); setGitDetail(null); }
+    finally { setGitLoading(false); }
+  }, [ws, gitQuery, gitBranch, gitAllBranches, gitAuthor, gitPath, gitSince, loadCommitDetail]);
+
+  const loadGitBranches = useCallback(async () => {
+    if (!ws) return;
+    try { setGitBranches(await call<GitBranch[]>("git_branches", { workspaceId: ws.id })); } catch (e) { setGitError(String(e)); }
+  }, [ws]);
+
   const openGit = useCallback(async () => {
-    setGitOpen(true); setGitFiles([]); setGitDiff(""); setGitSel(""); setGitError("");
+    setGitOpen(true); setGitError(""); setGitCommits([]); setGitDetail(null); setGitFile(""); setGitDiff("");
     if (!ws) return;
-    try { setGitFiles(await call<Array<{path:string;status:string}>>("git_changed_files", { workspaceId: ws.id })); } catch (e) { setStatus(String(e)); }
-  }, [ws]);
-  const showGitDiff = useCallback(async (path: string) => {
-    if (!ws) return;
-    setGitSel(path);
-    try { setGitDiff(await call<string>("git_file_diff", { workspaceId: ws.id, path })); } catch (e) { setGitDiff(String(e)); setGitError(String(e)); }
-  }, [ws]);
+    await loadGitBranches();
+    await loadGitLog(true);
+  }, [ws, loadGitBranches, loadGitLog]);
+
+  const showCommitFileDiff = useCallback(async (path: string) => {
+    if (!ws || !gitSelected) return;
+    setGitFile(path); setGitError("");
+    try { setGitDiff(await call<string>("git_commit_file_diff", { workspaceId: ws.id, hash: gitSelected, path })); }
+    catch (e) { setGitDiff(String(e)); setGitError(String(e)); }
+  }, [ws, gitSelected]);
+
+  useEffect(() => {
+    if (!gitOpen) { gitFilterInit.current = false; return; }
+    if (!gitFilterInit.current) { gitFilterInit.current = true; return; }
+    const timer = setTimeout(() => { loadGitLog(true); }, 320);
+    return () => clearTimeout(timer);
+  }, [gitOpen, gitQuery, gitBranch, gitAllBranches, gitAuthor, gitDateRange, gitPath, loadGitLog]);
 
   const dirOf = (p?: string) => (p && p.includes("/")) ? p.slice(0, p.lastIndexOf("/")) : "";
   const baseOf = (p: string) => p.split("/").pop() || p;
@@ -1548,40 +1680,122 @@ export default function App() {
         )}
       </main>
 
-      {/* Git last commit diff */}
+      {/* Git history log */}
       {gitOpen && (
         <div className="qo-overlay" onClick={() => setGitOpen(false)}>
-          <div className="qo-modal git-modal" onClick={e => e.stopPropagation()}>
-            <div className="git-modal-head">
-              <div>
-                <div className="git-title">最近提交</div>
-                <div className="git-subtitle">查看 HEAD 与上一提交的差异</div>
+          <div className="qo-modal git-history-modal" onClick={e => e.stopPropagation()}>
+            <div className="git-history-toolbar">
+              <div className="git-search">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9"><circle cx="11" cy="11" r="7"/><line x1="20" y1="20" x2="16.65" y2="16.65"/></svg>
+                <input value={gitQuery} placeholder="Text or hash" spellCheck={false}
+                  onChange={e => setGitQuery(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter") loadGitLog(true); }} />
               </div>
+              <select value={gitAllBranches ? "__ALL__" : gitBranch} onChange={e => {
+                if (e.target.value === "__ALL__") { setGitAllBranches(true); setGitBranch(""); }
+                else { setGitAllBranches(false); setGitBranch(e.target.value); }
+              }} title="Branch">
+                <option value="">当前分支</option>
+                <option value="__ALL__">所有分支</option>
+                {gitBranches.map(b => <option key={b.fullName} value={b.name}>{b.name}</option>)}
+              </select>
+              <select value={gitAuthor} onChange={e => setGitAuthor(e.target.value)} title="User">
+                <option value="">User</option>
+                {gitAuthors.map(a => <option key={a} value={a}>{a}</option>)}
+              </select>
+              <select value={gitDateRange} onChange={e => setGitDateRange(e.target.value)} title="Date">
+                <option value="all">Date</option>
+                <option value="today">今天</option>
+                <option value="7">最近 7 天</option>
+                <option value="30">最近 30 天</option>
+                <option value="365">最近一年</option>
+              </select>
+              <input className="git-path-input" value={gitPath} placeholder="Paths" spellCheck={false}
+                onChange={e => setGitPath(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") loadGitLog(true); }} />
+              <button className="icon-btn" title="刷新" onClick={() => { loadGitBranches(); loadGitLog(true); }}>↻</button>
               <button className="ref-popup-close" onClick={() => setGitOpen(false)}>✕</button>
             </div>
-            <div className="git-body">
-              <div className="git-list">
-                {gitError ? (
-                  <div className="ref-popup-empty git-error">{gitError}</div>
-                ) : gitFiles.length === 0 ? (
-                  <div className="ref-popup-empty">{gitSel ? "无差异" : "加载中…"}</div>
-                ) : gitFiles.map(f => (
-                  <button key={f.path} className={"git-file " + (gitSel === f.path ? "on" : "")} onClick={() => showGitDiff(f.path)}>
-                    <span className={"git-status st-" + (f.status || "M")[0].toUpperCase()}>{(f.status || "M")[0]}</span>
-                    <span className="git-file-path">{f.path}</span>
+
+            {gitError ? <div className="git-error git-error-banner">{gitError}</div> : null}
+
+            <div className="git-history-body">
+              <div className="git-history-list">
+                {gitLoading ? <div className="ref-popup-empty">加载提交历史…</div>
+                : gitCommits.length === 0 ? <div className="ref-popup-empty">无匹配提交</div>
+                : gitCommits.map((c, index) => (
+                  <button key={c.hash} className={`git-commit ${gitSelected === c.hash ? "on" : ""}`} onClick={() => { setGitSelected(c.hash); loadCommitDetail(c.hash); }}>
+                    <svg className="git-graph" aria-hidden="true" viewBox="0 0 56 56" preserveAspectRatio="none" style={{ width: Math.max(14, (gitGraph.maxLane + 1) * 14) }}>
+                      {(() => {
+                        const row = gitGraph.rows[index];
+                        const x = (lane: number) => 7 + lane * 12;
+                        const color = (lane: number) => ["#3574F0", "#B052A5", "#299D60", "#D87727", "#E0685C"][lane % 5];
+                        return (
+                          <>
+                            {row.verticals.map(l => <line key={"v-" + l} x1={x(l)} y1="0" x2={x(l)} y2="56" stroke={color(l)} strokeWidth="2" opacity="0.5" />)}
+                            {row.edges.map((edge, edgeIndex) => (
+                              <path key={"e-" + edgeIndex} d={"M " + x(edge.from) + " 28 C " + x(edge.from) + " 43, " + x(edge.to) + " 40, " + x(edge.to) + " 56"} fill="none" stroke={color(edge.to)} strokeWidth="2" opacity="0.75" />
+                            ))}
+                            <circle cx={x(row.lane)} cy="28" r="4.5" fill={color(row.lane)} stroke="var(--surface)" strokeWidth="2" />
+                          </>
+                        );
+                      })()}
+                    </svg>
+                    <span className="git-commit-main">
+                      <span className="git-commit-subject">{c.subject}</span>
+                      <span className="git-commit-meta">
+                        <b>{c.authorName}</b>
+                        <span>{new Date(c.timestamp * 1000).toLocaleString()}</span>
+                      </span>
+                      {gitRefBadges(c.refs).length > 0 && (
+                        <span className="git-ref-row">
+                          {gitRefBadges(c.refs).map((r, i) => <em key={i}>{r}</em>)}
+                        </span>
+                      )}
+                    </span>
                   </button>
                 ))}
               </div>
-              <div className="git-diff">
-                {gitDiff ? gitDiff.split("\n").map((line, i) => (
-                  <div key={i} className={"diff-line " + (line.startsWith("+") && !line.startsWith("+++") ? "add" : line.startsWith("-") && !line.startsWith("---") ? "del" : line.startsWith("@@") ? "hunk" : "")}>{line || " "}</div>
-                )) : <div className="ref-popup-empty">选择文件查看差异</div>}
+
+              <div className="git-diff-pane">
+                {gitDetail ? (
+                  <div className="git-commit-detail">
+                    <div className="git-detail-subject">{gitDetail.commit.subject}</div>
+                    {gitDetail.commit.body.trim() && <div className="git-detail-body">{gitDetail.commit.body.trim()}</div>}
+                    <div className="git-detail-meta">
+                      <code>{gitDetail.commit.shortHash}</code>
+                      <span>{gitDetail.commit.authorName} &lt;{gitDetail.commit.authorEmail}&gt;</span>
+                      <span>{new Date(gitDetail.commit.timestamp * 1000).toLocaleString()}</span>
+                    </div>
+                    <div className="git-detail-parents">Parents: {gitDetail.commit.parents.join(", ") || "root"}</div>
+                  </div>
+                ) : <div className="ref-popup-empty">{gitDetailLoading ? "加载提交详情…" : "选择一个提交"}</div>}
+                <div className="git-diff-view">
+                  {gitFile ? <div className="git-diff-file">{gitFile}</div> : null}
+                  {gitDiff ? gitDiff.split("\n").map((line, i) => (
+                    <div key={i} className={"diff-line " + (line.startsWith("+") && !line.startsWith("+++") ? "add" : line.startsWith("-") && !line.startsWith("---") ? "del" : line.startsWith("@@") ? "hunk" : "")}>{line || " "}</div>
+                  )) : <div className="ref-popup-empty">{gitDetailLoading ? "加载差异…" : "选择变更文件"}</div>}
+                </div>
+              </div>
+
+              <div className="git-files-pane">
+                <div className="git-files-title">本次提交变更</div>
+                {gitDetail?.files.length ? groupChangedFiles(gitDetail.files).map(([dir, files]) => (
+                  <div key={dir} className="git-file-group">
+                    <div className="git-file-dir">{dir === "." ? "根目录" : dir}<span>{files.length}</span></div>
+                    {files.map(f => (
+                      <button key={f.path} className={`git-file ${gitFile === f.path ? "on" : ""}`} onClick={() => showCommitFileDiff(f.path)}>
+                        <span className={`git-status st-${(f.status || "M")[0].toUpperCase()}`}>{(f.status || "M")[0]}</span>
+                        <span className="git-file-path">{f.path.split("/").pop()}</span>
+                      </button>
+                    ))}
+                  </div>
+                )) : <div className="ref-popup-empty">{gitDetailLoading ? "加载文件…" : "无文件"}</div>}
               </div>
             </div>
           </div>
         </div>
       )}
-
 
       {/* Global search modal */}
       {searchModalOpen && (

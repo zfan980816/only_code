@@ -11,8 +11,9 @@ use crate::fs_util::{
 };
 use crate::indexer::index_workspace;
 use crate::models::{
-    FileDocument, HighlightSpan, IndexProgress, NavigationTarget, SearchOptions, SearchResponse,
-    SearchResult, Symbol, TreeNode, Workspace,
+    FileDocument, GitBranch, GitCommit, GitCommitDetail, GitFileChange, GitLogOptions,
+    HighlightSpan, IndexProgress, NavigationTarget, SearchOptions, SearchResponse, SearchResult,
+    Symbol, TreeNode, Workspace,
 };
 use crate::search::search_workspace;
 use crate::state::{emit_progress, insert_workspace, set_symbols, workspace_root, workspace_symbols};
@@ -189,12 +190,6 @@ pub fn file_read(workspace_id: String, path: String) -> Result<FileDocument, Str
     })
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GitFileChange {
-    pub path: String,
-    pub status: String,
-}
 
 #[tauri::command]
 pub fn file_create(workspace_id: String, path: String, content: Option<String>) -> Result<(), String> {
@@ -259,31 +254,21 @@ fn changed_path(status: &str, paths: &[&str]) -> Option<String> {
     if path.is_empty() { None } else { Some(path.to_string()) }
 }
 
-pub fn git_changed_files_in(root: &std::path::Path) -> Result<Vec<GitFileChange>, String> {
-    let head = git_command(root)
-        .args(["rev-parse", "--verify", "HEAD"])
-        .output()
-        .map_err(|e| format!("git 不可用: {e}"))?;
-    if !head.status.success() {
-        let message = git_stderr(&head);
-        if message.contains("bad revision") || message.contains("ambiguous argument") {
-            return Err("当前仓库还没有提交".to_string());
-        }
-        return Err("此文件夹不是 Git 仓库".to_string());
+fn ensure_git_commit(root: &std::path::Path, rev: &str) -> Result<(), String> {
+    if rev.is_empty()
+        || rev.len() > 120
+        || !rev.chars().all(|c| c.is_ascii_alphanumeric() || "-_.~/^".contains(c))
+    {
+        return Err("无效的 Git 提交".to_string());
     }
-
     let out = git_command(root)
-        .args([
-            "-c", "core.quotepath=false", "diff-tree", "--no-commit-id",
-            "--name-status", "-r", "--first-parent", "--relative", "HEAD",
-        ])
+        .args(["rev-parse", "--verify", "--quiet", "--end-of-options", &format!("{}^{{commit}}", rev)])
         .output()
         .map_err(|e| format!("git 不可用: {e}"))?;
-    if !out.status.success() {
-        return Err(git_stderr(&out));
-    }
+    if out.status.success() { Ok(()) } else { Err("Git 提交不存在".to_string()) }
+}
 
-    let text = String::from_utf8_lossy(&out.stdout);
+fn parse_changed_files(text: &str) -> Vec<GitFileChange> {
     let mut files = Vec::new();
     for line in text.lines() {
         let mut fields = line.split('\t');
@@ -293,7 +278,58 @@ pub fn git_changed_files_in(root: &std::path::Path) -> Result<Vec<GitFileChange>
             files.push(GitFileChange { path, status: status.to_string() });
         }
     }
-    Ok(files)
+    files
+}
+
+fn parse_commit_record(record: &str) -> Option<GitCommit> {
+    let fields: Vec<&str> = record.split('\u{1f}').collect();
+    if fields.len() < 8 { return None; }
+    Some(GitCommit {
+        hash: fields[0].trim().to_string(),
+        short_hash: fields[1].trim().to_string(),
+        subject: fields[2].trim().to_string(),
+        body: fields[3].to_string(),
+        author_name: fields[4].trim().to_string(),
+        author_email: fields[5].trim().to_string(),
+        timestamp: fields[6].trim().parse().unwrap_or(0),
+        refs: fields[7].trim().to_string(),
+        parents: fields[8]
+            .split_whitespace()
+            .map(|p| p.to_string())
+            .collect(),
+    })
+}
+
+fn changed_files_for_revision(root: &std::path::Path, rev: &str, include_root: bool) -> Result<Vec<GitFileChange>, String> {
+    ensure_git_commit(root, rev)?;
+    let mut args = vec![
+        "-c".to_string(), "core.quotepath=false".to_string(), "diff-tree".to_string(),
+        "--no-commit-id".to_string(), "--name-status".to_string(), "-r".to_string(),
+        "--first-parent".to_string(), "--relative".to_string(),
+    ];
+    if include_root { args.push("--root".to_string()); }
+    args.push(rev.to_string());
+    let out = git_command(root).args(&args).output().map_err(|e| format!("git 不可用: {e}"))?;
+    if !out.status.success() { return Err(git_stderr(&out)); }
+    Ok(parse_changed_files(&String::from_utf8_lossy(&out.stdout)))
+}
+
+fn git_commit_from_rev(root: &std::path::Path, rev: &str) -> Result<GitCommit, String> {
+    ensure_git_commit(root, rev)?;
+    let format = "%H%x1f%h%x1f%s%x1f%b%x1f%an%x1f%ae%x1f%at%x1f%D%x1f%P%x1e";
+    let out = git_command(root)
+        .args(["-c", "core.quotepath=false", "show", "-s", "--date=unix", &format!("--pretty=format:{}", format), rev])
+        .output()
+        .map_err(|e| format!("git 不可用: {e}"))?;
+    if !out.status.success() { return Err(git_stderr(&out)); }
+    String::from_utf8_lossy(&out.stdout)
+        .split('\u{1e}')
+        .find_map(parse_commit_record)
+        .ok_or_else(|| "无法解析 Git 提交".to_string())
+}
+
+pub fn git_changed_files_in(root: &std::path::Path) -> Result<Vec<GitFileChange>, String> {
+    changed_files_for_revision(root, "HEAD", true)
 }
 
 pub fn git_file_diff_in(root: &std::path::Path, path: &str) -> Result<String, String> {
@@ -340,6 +376,135 @@ pub fn git_file_diff(workspace_id: String, path: String) -> Result<String, Strin
     let root = workspace_root(&workspace_id)?;
     safe_relative_path(&root, &path)?;
     git_file_diff_in(&root, &path)
+}
+
+pub fn git_log_in(root: &std::path::Path, options: &GitLogOptions) -> Result<Vec<GitCommit>, String> {
+    let head = git_command(root).args(["rev-parse", "--verify", "--quiet", "HEAD"]).output()
+        .map_err(|e| format!("git 不可用: {e}"))?;
+    if !head.status.success() {
+        let message = git_stderr(&head);
+        return Err(if message.contains("bad revision") || message.contains("ambiguous argument") {
+            "当前仓库还没有提交".to_string()
+        } else { "此文件夹不是 Git 仓库".to_string() });
+    }
+
+    let format = "%H%x1f%h%x1f%s%x1f%b%x1f%an%x1f%ae%x1f%at%x1f%D%x1f%P%x1e";
+    let mut args = vec![
+        "-c".to_string(), "core.quotepath=false".to_string(), "log".to_string(),
+        "--no-color".to_string(), "--date=unix".to_string(), "--topo-order".to_string(),
+        format!("--pretty=format:{}", format),
+        format!("--max-count={}", options.limit.clamp(1, 1000)),
+    ];
+    if options.all_branches { args.push("--all".to_string()); }
+    else if let Some(branch) = options.branch.as_deref().filter(|v| !v.trim().is_empty()) {
+        args.push(branch.trim().to_string());
+    }
+    if let Some(author) = options.author.as_deref().filter(|v| !v.trim().is_empty()) { args.push(format!("--author={}", author.trim())); }
+    if let Some(since) = options.since.as_deref().filter(|v| !v.trim().is_empty()) { args.push(format!("--since={}", since.trim())); }
+    if let Some(until) = options.until.as_deref().filter(|v| !v.trim().is_empty()) { args.push(format!("--until={}", until.trim())); }
+    args.push("--".to_string());
+    if let Some(path) = options.path.as_deref().filter(|v| !v.trim().is_empty()) { args.push(path.trim().to_string()); }
+
+    let out = git_command(root).args(&args).output().map_err(|e| format!("git 不可用: {e}"))?;
+    if !out.status.success() { return Err(git_stderr(&out)); }
+    let query = options.query.as_deref().unwrap_or("").trim().to_lowercase();
+    let commits = String::from_utf8_lossy(&out.stdout)
+        .split('\u{1e}')
+        .filter_map(parse_commit_record)
+        .filter(|commit| {
+            query.is_empty()
+                || commit.hash.to_lowercase().contains(&query)
+                || commit.short_hash.to_lowercase().contains(&query)
+                || commit.subject.to_lowercase().contains(&query)
+                || commit.body.to_lowercase().contains(&query)
+                || commit.author_name.to_lowercase().contains(&query)
+                || commit.author_email.to_lowercase().contains(&query)
+        })
+        .collect();
+    Ok(commits)
+}
+
+pub fn git_branches_in(root: &std::path::Path) -> Result<Vec<GitBranch>, String> {
+    let head = git_command(root).args(["rev-parse", "--verify", "--quiet", "HEAD"]).output()
+        .map_err(|e| format!("git 不可用: {e}"))?;
+    if !head.status.success() { return Err("此文件夹不是 Git 仓库".to_string()); }
+    let current_out = git_command(root).args(["rev-parse", "--abbrev-ref", "HEAD"]).output().map_err(|e| format!("git 不可用: {e}"))?;
+    let current = String::from_utf8_lossy(&current_out.stdout).trim().to_string();
+    let out = git_command(root)
+        .args(["-c", "core.quotepath=false", "for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes"])
+        .output()
+        .map_err(|e| format!("git 不可用: {e}"))?;
+    if !out.status.success() { return Err(git_stderr(&out)); }
+    let mut branches = Vec::new();
+    for full in String::from_utf8_lossy(&out.stdout).lines().map(str::trim).filter(|v| !v.is_empty()) {
+        let (kind, name) = if let Some(name) = full.strip_prefix("refs/heads/") {
+            ("local", name)
+        } else if let Some(name) = full.strip_prefix("refs/remotes/") {
+            if name.ends_with("/HEAD") { continue; }
+            ("remote", name)
+        } else { continue };
+        branches.push(GitBranch {
+            name: name.to_string(), full_name: full.to_string(), kind: kind.to_string(),
+            is_current: kind == "local" && name == current,
+        });
+    }
+    branches.sort_by(|a, b| b.is_current.cmp(&a.is_current).then(a.kind.cmp(&b.kind)).then(a.name.to_lowercase().cmp(&b.name.to_lowercase())));
+    Ok(branches)
+}
+
+pub fn git_commit_detail_in(root: &std::path::Path, hash: &str) -> Result<GitCommitDetail, String> {
+    let commit = git_commit_from_rev(root, hash)?;
+    let files = changed_files_for_revision(root, &commit.hash, true)?;
+    Ok(GitCommitDetail { commit, files })
+}
+
+pub fn git_commit_file_diff_in(root: &std::path::Path, hash: &str, path: &str) -> Result<String, String> {
+    ensure_git_commit(root, hash)?;
+    let parent = git_command(root)
+        .args(["rev-parse", "--verify", "--quiet", "--end-of-options", &format!("{}^1", hash)])
+        .output()
+        .map_err(|e| format!("git 不可用: {e}"))?;
+    let out = if parent.status.success() {
+        git_command(root)
+            .args(["-c", "core.quotepath=false", "diff", "--no-color", &format!("{}^1", hash), hash, "--"])
+            .arg(path)
+            .output()
+            .map_err(|e| format!("git 不可用: {e}"))?
+    } else {
+        git_command(root)
+            .args(["-c", "core.quotepath=false", "diff-tree", "--patch", "--root", "--no-color", hash, "--"])
+            .arg(path)
+            .output()
+            .map_err(|e| format!("git 不可用: {e}"))?
+    };
+    if !out.status.success() { return Err(git_stderr(&out)); }
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
+#[tauri::command]
+pub fn git_log(workspace_id: String, options: Option<GitLogOptions>) -> Result<Vec<GitCommit>, String> {
+    let root = workspace_root(&workspace_id)?;
+    let options = options.unwrap_or(GitLogOptions { query: None, branch: None, author: None, since: None, until: None, path: None, all_branches: false, limit: 200 });
+    git_log_in(&root, &options)
+}
+
+#[tauri::command]
+pub fn git_branches(workspace_id: String) -> Result<Vec<GitBranch>, String> {
+    let root = workspace_root(&workspace_id)?;
+    git_branches_in(&root)
+}
+
+#[tauri::command]
+pub fn git_commit_detail(workspace_id: String, hash: String) -> Result<GitCommitDetail, String> {
+    let root = workspace_root(&workspace_id)?;
+    git_commit_detail_in(&root, &hash)
+}
+
+#[tauri::command]
+pub fn git_commit_file_diff(workspace_id: String, hash: String, path: String) -> Result<String, String> {
+    let root = workspace_root(&workspace_id)?;
+    safe_relative_path(&root, &path)?;
+    git_commit_file_diff_in(&root, &hash, &path)
 }
 
 #[tauri::command]

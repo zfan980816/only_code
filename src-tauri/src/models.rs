@@ -122,3 +122,63 @@ pub struct IndexProgress {
     pub phase: String,
     pub indexed_files: usize,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitFileChange {
+    pub path: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitBranch {
+    pub name: String,
+    pub full_name: String,
+    pub kind: String,
+    pub is_current: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCommit {
+    pub hash: String,
+    pub short_hash: String,
+    pub subject: String,
+    pub body: String,
+    pub author_name: String,
+    pub author_email: String,
+    pub timestamp: i64,
+    pub refs: String,
+    pub parents: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitLogOptions {
+    #[serde(default)]
+    pub query: Option<String>,
+    #[serde(default)]
+    pub branch: Option<String>,
+    #[serde(default)]
+    pub author: Option<String>,
+    #[serde(default)]
+    pub since: Option<String>,
+    #[serde(default)]
+    pub until: Option<String>,
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub all_branches: bool,
+    #[serde(default = "default_git_log_limit")]
+    pub limit: usize,
+}
+
+fn default_git_log_limit() -> usize { 200 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCommitDetail {
+    pub commit: GitCommit,
+    pub files: Vec<GitFileChange>,
+}
