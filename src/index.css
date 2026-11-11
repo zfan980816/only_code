@@ -503,10 +503,10 @@ html, body, #root { height: 100vh; overflow: hidden; }
 }
 .resize-handle.active { background: var(--accent); }
 
+/* inset shadow instead of border-left: no layout shift, content stays aligned with other lines */
 .code-line.jump-target {
   background: rgba(232,93,61,.08) !important;
-  border-left: 3px solid var(--accent);
-  padding-left: 4px !important;
+  box-shadow: inset 3px 0 0 var(--accent);
   animation: jumpPulse 1.5s ease-in-out;
 }
 @keyframes jumpPulse {
