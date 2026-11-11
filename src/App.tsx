@@ -16,6 +16,8 @@ interface GitBranch { name: string; fullName: string; kind: string; isCurrent: b
 interface GitCommit { hash: string; shortHash: string; subject: string; body: string; authorName: string; authorEmail: string; timestamp: number; refs: string; parents: string[]; }
 interface GitFileChange { path: string; status: string; }
 interface GitCommitDetail { commit: GitCommit; files: GitFileChange[]; }
+interface GitBlameLine { line: number; hash: string; shortHash: string; authorName: string; authorEmail: string; timestamp: number; summary: string; }
+interface CallHierarchyTarget { name: string; kind: string; path: string; start: number; end: number; startLine: number; startColumn: number; referenceLine: number; referenceText: string; }
 
 function groupChangedFiles(files: GitFileChange[]) {
   const groups = new Map<string, GitFileChange[]>();
@@ -254,6 +256,18 @@ export default function App() {
   const [dark, setDark] = useState(() => localStorage.getItem("lr-theme") === "dark");
   const [gitOpen, setGitOpen] = useState(false);
   const [gitError, setGitError] = useState("");
+  const [gitTab, setGitTab] = useState<"history" | "working">("history");
+  const [workingFiles, setWorkingFiles] = useState<GitFileChange[]>([]);
+  const [workingSel, setWorkingSel] = useState("");
+  const [workingDiff, setWorkingDiff] = useState("");
+  const [workingLoading, setWorkingLoading] = useState(false);
+  const [blameOpen, setBlameOpen] = useState(false);
+  const [blameLoading, setBlameLoading] = useState(false);
+  const [blameByLine, setBlameByLine] = useState<Record<number, GitBlameLine>>({});
+  const [callDirection, setCallDirection] = useState<"incoming" | "outgoing">("incoming");
+  const [callTarget, setCallTarget] = useState("");
+  const [callTargets, setCallTargets] = useState<CallHierarchyTarget[]>([]);
+  const [callLoading, setCallLoading] = useState(false);
   const [gitLoading, setGitLoading] = useState(false);
   const [gitDetailLoading, setGitDetailLoading] = useState(false);
   const [gitCommits, setGitCommits] = useState<GitCommit[]>([]);
@@ -584,7 +598,7 @@ export default function App() {
     try {
       setErr(null); setStatus(`Loading...`);
       const d = await call<Doc>("file_read", { workspaceId: ws.id, path });
-      setDoc(d); setRefs([]); setDefs([]); setFileSearch(""); setFileSearchVisible(false); setCursor({line:1,col:1}); _inMultiLine = false; setEditing(false);
+      setDoc(d); setRefs([]); setDefs([]); setFileSearch(""); setFileSearchVisible(false); setCursor({line:1,col:1}); _inMultiLine = false; setEditing(false); setBlameOpen(false); setBlameByLine({}); setCallTargets([]); setCallTarget("");
       const name = path.split("/").pop() || path;
       setTabs(prev => {
         if (prev.some(tb => tb.path === path)) return prev;
@@ -607,7 +621,7 @@ export default function App() {
     setActiveTab(idx);
     try {
       const d = await call<Doc>("file_read", { workspaceId: ws.id, path: tabs[idx].path });
-      setDoc(d); setEditing(false);
+      setDoc(d); setEditing(false); setBlameOpen(false); setBlameByLine({}); setCallTargets([]); setCallTarget("");
       try { setSyms(await call<Sym[]>("outline", { workspaceId: ws.id, path: tabs[idx].path })); } catch { setSyms([]); }
       setStatus(`${tabs[idx].path} · ${d.language}`);
     } catch (e) { setStatus(`ERR: ${e}`); }
@@ -743,7 +757,7 @@ export default function App() {
   }, [ws]);
 
   const openGit = useCallback(async () => {
-    setGitOpen(true); setGitError(""); setGitCommits([]); setGitDetail(null); setGitFile(""); setGitDiff("");
+    setGitOpen(true); setGitError(""); setGitCommits([]); setGitDetail(null); setGitFile(""); setGitDiff(""); setGitTab("history");
     if (!ws) return;
     await loadGitBranches();
     await loadGitLog(true);
@@ -755,6 +769,55 @@ export default function App() {
     try { setGitDiff(await call<string>("git_commit_file_diff", { workspaceId: ws.id, hash: gitSelected, path })); }
     catch (e) { setGitDiff(String(e)); setGitError(String(e)); }
   }, [ws, gitSelected]);
+
+  const loadWorkingChanges = useCallback(async () => {
+    if (!ws) return;
+    setWorkingLoading(true); setGitError("");
+    try {
+      const files = await call<GitFileChange[]>("git_working_changes", { workspaceId: ws.id });
+      setWorkingFiles(files);
+      setWorkingSel(""); setWorkingDiff("");
+      const first = files[0];
+      if (first) {
+        setWorkingSel(first.path);
+        setWorkingDiff(await call<string>("git_working_diff", { workspaceId: ws.id, path: first.path }));
+      }
+    } catch (e) { setGitError(String(e)); setWorkingFiles([]); }
+    finally { setWorkingLoading(false); }
+  }, [ws]);
+
+  const showWorkingDiff = useCallback(async (path: string) => {
+    if (!ws) return;
+    setWorkingSel(path); setGitError("");
+    try { setWorkingDiff(await call<string>("git_working_diff", { workspaceId: ws.id, path })); }
+    catch (e) { setWorkingDiff(String(e)); setGitError(String(e)); }
+  }, [ws]);
+
+  const toggleBlame = useCallback(async () => {
+    if (!ws || !activeTabData?.path || !doc) return;
+    if (blameOpen) { setBlameOpen(false); setBlameByLine({}); return; }
+    setBlameOpen(true); setBlameLoading(true);
+    try {
+      const lines = await call<GitBlameLine[]>("git_blame", { workspaceId: ws.id, path: activeTabData.path });
+      setBlameByLine(Object.fromEntries(lines.map(line => [line.line, line])));
+    } catch (e) { setStatus(String(e)); setBlameOpen(false); setBlameByLine({}); }
+    finally { setBlameLoading(false); }
+  }, [ws, activeTabData, doc, blameOpen]);
+
+  const loadCallHierarchy = useCallback(async (direction: "incoming" | "outgoing") => {
+    if (!ws || !activeTabData?.path || !highlightWord) {
+      setStatus("请先点击代码中的函数、方法或类名");
+      return;
+    }
+    setCallDirection(direction); setCallTarget(highlightWord); setCallLoading(true);
+    try {
+      setCallTargets(await call<CallHierarchyTarget[]>("call_hierarchy", {
+        workspaceId: ws.id, path: activeTabData.path, start: 0, end: 0,
+        direction, name: highlightWord,
+      }));
+    } catch (e) { setCallTargets([]); setStatus(String(e)); }
+    finally { setCallLoading(false); }
+  }, [ws, activeTabData, highlightWord]);
 
   useEffect(() => {
     if (!gitOpen) { gitFilterInit.current = false; return; }
@@ -1445,6 +1508,9 @@ export default function App() {
                   {!editing && <button className="btn-mini" onClick={startEdit}>编辑</button>}
                   {editing && <button className="btn-mini save" onClick={saveEdit}>保存</button>}
                   {editing && <button className="btn-mini" onClick={cancelEdit}>取消</button>}
+                  <button className={"btn-mini " + (blameOpen ? "save" : "")} onClick={toggleBlame}>{blameLoading ? "Blame…" : "Blame"}</button>
+                  <button className={"btn-mini " + (callDirection === "incoming" && callTarget === highlightWord ? "save" : "")} onClick={() => loadCallHierarchy("incoming")}>↑ Callers</button>
+                  <button className={"btn-mini " + (callDirection === "outgoing" && callTarget === highlightWord ? "save" : "")} onClick={() => loadCallHierarchy("outgoing")}>↓ Calls</button>
                   <span className="lang-tag">{doc.language}</span>
                 </div>
               </div>
@@ -1605,6 +1671,16 @@ export default function App() {
                             title="Click to expand">{placeholder}</span>
                         )}
                       </span>
+                      {blameOpen && blameByLine[i + 1] && (() => {
+                        const blame = blameByLine[i + 1];
+                        return (
+                          <span className="blame-info" title={blame.summary}>
+                            <span className="blame-author">{blame.authorName}</span>
+                            <span className="blame-hash">{blame.shortHash}</span>
+                            <span className="blame-date">{new Date(blame.timestamp * 1000).toLocaleDateString()}</span>
+                          </span>
+                        );
+                      })()}
                     </div>
                   );
                 })}
@@ -1648,6 +1724,20 @@ export default function App() {
                   </div>
                 );
               })}
+            {(callTarget || callLoading) && (
+              <div className="panel">
+                <h4>{callDirection === "incoming" ? "Callers" : "Calls"}: {callTarget}</h4>
+                {callLoading ? <span className="muted">分析中…</span>
+                : callTargets.length === 0 ? <span className="muted">无调用</span>
+                : callTargets.map((target, i) => (
+                  <div key={i} className="sym-row call-row" onClick={() => openFile(target.path, target.referenceLine)}>
+                    <span className="kind">{target.kind}</span>{target.name}
+                    <span className="call-line">{target.path}:{target.referenceLine}</span>
+                    <span className="call-text">{target.referenceText}</span>
+                  </div>
+                ))}
+              </div>
+            )}
             {refs.length > 0 && (
               <div className="panel">
                 <h4>{t("refsFor")}: {refTarget}</h4>
@@ -1685,6 +1775,10 @@ export default function App() {
         <div className="qo-overlay" onClick={() => setGitOpen(false)}>
           <div className="qo-modal git-history-modal" onClick={e => e.stopPropagation()}>
             <div className="git-history-toolbar">
+              <div className="git-mode-tabs">
+                <button className={gitTab === "history" ? "on" : ""} onClick={() => setGitTab("history")}>History</button>
+                <button className={gitTab === "working" ? "on" : ""} onClick={() => { setGitTab("working"); loadWorkingChanges(); }}>未提交</button>
+              </div>
               <div className="git-search">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9"><circle cx="11" cy="11" r="7"/><line x1="20" y1="20" x2="16.65" y2="16.65"/></svg>
                 <input value={gitQuery} placeholder="Text or hash" spellCheck={false}
@@ -1719,6 +1813,7 @@ export default function App() {
 
             {gitError ? <div className="git-error git-error-banner">{gitError}</div> : null}
 
+            {gitTab === "history" ? (
             <div className="git-history-body">
               <div className="git-history-list">
                 {gitLoading ? <div className="ref-popup-empty">加载提交历史…</div>
@@ -1793,11 +1888,31 @@ export default function App() {
                 )) : <div className="ref-popup-empty">{gitDetailLoading ? "加载文件…" : "无文件"}</div>}
               </div>
             </div>
+            ) : (
+            <div className="git-working-body">
+              <div className="git-list">
+                {workingLoading ? <div className="ref-popup-empty">读取未提交变更…</div>
+                : workingFiles.length === 0 ? <div className="ref-popup-empty">没有未提交修改</div>
+                : workingFiles.map(f => (
+                  <button key={f.path} className={`git-file ${workingSel === f.path ? "on" : ""}`} onClick={() => showWorkingDiff(f.path)}>
+                    <span className={`git-status st-${(f.status || "M")[0].toUpperCase()}`}>{(f.status || "M")[0]}</span>
+                    <span className="git-file-path">{f.path}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="git-diff git-diff-view">
+                {workingSel ? <div className="git-diff-file">{workingSel}</div> : null}
+                {workingDiff ? workingDiff.split("\n").map((line, i) => (
+                  <div key={i} className={"diff-line " + (line.startsWith("+") && !line.startsWith("+++") ? "add" : line.startsWith("-") && !line.startsWith("---") ? "del" : line.startsWith("@@") ? "hunk" : "")}>{line || " "}</div>
+                )) : <div className="ref-popup-empty">选择文件查看未提交差异</div>}
+              </div>
+            </div>
+            )}
           </div>
         </div>
       )}
 
-      {/* Global search modal */}
+      {/* Global search modal */}      {/* Global search modal */}
       {searchModalOpen && (
         <div className="qo-overlay" onClick={() => setSearchModalOpen(false)}>
           <div className="qo-modal" onClick={e => e.stopPropagation()}>

@@ -13,6 +13,9 @@
 - 新建、重命名、删除文件，左侧树实时同步
 - 文件标签页、文件内搜索、代码缩放、固定行号与当前行高亮
 - Git History：提交图、搜索/Hash 查找、分支/作者/日期/路径过滤、提交详情、变更文件分组和逐文件 diff
+- Git 未提交修改：Working Tree vs HEAD 的文件列表和 diff
+- Git blame：逐行查看作者、提交和时间
+- 近似 Call Hierarchy：查看 Callers / Calls，支持已接入语言与 Rust 函数体提取
 - 明 / 暗主题，IDE 风格三栏布局，可拖拽调整侧栏宽度
 - 本地设置：界面语言、主题、代码字号/字体/行距、行号、当前行高亮、会话恢复、删除确认
 
@@ -142,7 +145,9 @@ npm run tauri build
 
 ## Git History
 
-点击左侧面板右上角的 Git 图标，打开完整提交历史：
+点击左侧面板右上角的 Git 图标，打开 Git 面板：
+
+### 提交历史
 
 - 左侧显示提交图、提交标题、作者、时间和分支标签
 - 顶部支持 Text/Hash、Branch、User、Date、Paths 过滤
@@ -150,6 +155,30 @@ npm run tauri build
 - 右侧按目录分组显示本次提交的变更文件
 - 支持“当前分支”和“所有分支”历史
 - 中文/特殊字符路径、仓库子目录、根提交、合并提交都有兼容处理
+
+### 未提交修改
+
+切换到 **未提交**：
+
+- 列出 Working Tree 中修改、新增、删除的文件
+- 查看 Working Tree vs HEAD 的 diff
+- 新文件会以新增行形式显示
+
+### Git Blame
+
+打开文件后点击 **Blame**：
+
+- 每行右侧显示作者、短 hash、日期
+- 悬停查看提交摘要
+
+### Call Hierarchy
+
+点击代码中的函数/方法/类名，然后点击 **↑ Callers** 或 **↓ Calls**：
+
+- 查看谁调用了这个符号
+- 查看这个符号内部调用的其他符号
+- 点击结果跳转到具体调用行
+- JS / TS / TSX / Python / Java 使用符号索引；Rust 使用近似函数体提取
 
 ## 支持的语言
 
@@ -221,7 +250,7 @@ Windows 下缺少 Visual Studio Build Tools。安装 [VS Build Tools](https://vi
 - [x] 跳转到定义
 - [x] 查找引用
 - [x] Git 最近提交 diff 视图
-- [ ] 调用链可视化
+- [x] 近似调用链 Call Hierarchy
 - [ ] 插件系统与可选 LSP
 - [ ] AI 摘要（可选插件）
 

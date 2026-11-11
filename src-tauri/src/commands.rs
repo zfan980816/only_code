@@ -11,12 +11,13 @@ use crate::fs_util::{
 };
 use crate::indexer::index_workspace;
 use crate::models::{
-    FileDocument, GitBranch, GitCommit, GitCommitDetail, GitFileChange, GitLogOptions,
+    CallHierarchyTarget, FileDocument, GitBlameLine, GitBranch, GitCommit, GitCommitDetail,
+    GitFileChange, GitLogOptions,
     HighlightSpan, IndexProgress, NavigationTarget, SearchOptions, SearchResponse, SearchResult,
     Symbol, TreeNode, Workspace,
 };
 use crate::search::search_workspace;
-use crate::state::{emit_progress, insert_workspace, set_symbols, workspace_root, workspace_symbols};
+use crate::state::{emit_progress, insert_workspace, set_symbols, workspace_root, workspace_symbols, WORKSPACES};
 use crate::symbols::{extract_symbols, highlight_source, read_text_file, symbol_at};
 
 #[tauri::command]
@@ -505,6 +506,350 @@ pub fn git_commit_file_diff(workspace_id: String, hash: String, path: String) ->
     let root = workspace_root(&workspace_id)?;
     safe_relative_path(&root, &path)?;
     git_commit_file_diff_in(&root, &hash, &path)
+}
+
+fn parse_working_status_line(line: &str) -> Option<GitFileChange> {
+    if line.len() < 3 { return None; }
+    let status = line[..2].trim().to_string();
+    let raw_path = &line[3..];
+    let path = raw_path.rsplit(" -> ").next()?.trim().to_string();
+    if path.is_empty() { return None; }
+    let code = if status.is_empty() { "M".to_string() } else { status.split("").last().unwrap_or("M").to_string() };
+    Some(GitFileChange { path, status: code })
+}
+
+pub fn git_working_changes_in(root: &std::path::Path) -> Result<Vec<GitFileChange>, String> {
+    let head = git_command(root).args(["rev-parse", "--verify", "--quiet", "HEAD"]).output()
+        .map_err(|e| format!("git 不可用: {e}"))?;
+    if !head.status.success() { return Err("此文件夹不是 Git 仓库".to_string()); }
+    let out = git_command(root)
+        .args(["-c", "core.quotepath=false", "status", "--porcelain", "--untracked-files=all"])
+        .output()
+        .map_err(|e| format!("git 不可用: {e}"))?;
+    if !out.status.success() { return Err(git_stderr(&out)); }
+    let mut files = Vec::new();
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        if let Some(file) = parse_working_status_line(line) {
+            if !files.iter().any(|f: &GitFileChange| f.path == file.path) { files.push(file); }
+        }
+    }
+    files.sort_by(|a, b| a.path.to_lowercase().cmp(&b.path.to_lowercase()));
+    Ok(files)
+}
+
+pub fn git_working_diff_in(root: &std::path::Path, path: &str) -> Result<String, String> {
+    let target = safe_relative_path(root, path)?;
+    let files = git_working_changes_in(root)?;
+    let entry = files.iter().find(|f| f.path == path);
+    let untracked = entry.map(|f| f.status == "?").unwrap_or(false);
+    let out = if untracked {
+        git_command(root)
+            .args(["-c", "core.quotepath=false", "diff", "--no-index", "--no-color", "--", "/dev/null"])
+            .arg(&target)
+            .output()
+            .map_err(|e| format!("git 不可用: {e}"))?
+    } else {
+        git_command(root)
+            .args(["-c", "core.quotepath=false", "diff", "HEAD", "--no-color", "--"])
+            .arg(path)
+            .output()
+            .map_err(|e| format!("git 不可用: {e}"))?
+    };
+    // git diff --no-index returns 1 for differences; that is expected.
+    if out.status.code() == Some(1) || out.status.success() {
+        return Ok(String::from_utf8_lossy(&out.stdout).to_string());
+    }
+    Err(git_stderr(&out))
+}
+
+fn is_blame_revision(line: &str) -> Option<(String, usize, usize)> {
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    if parts.len() < 3 || parts[0].len() != 40 || !parts[0].chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    let orig = parts[1].parse::<usize>().ok()?;
+    let current = parts[2].parse::<usize>().ok()?;
+    Some((parts[0].to_string(), orig, current))
+}
+
+pub fn git_blame_in(root: &std::path::Path, path: &str) -> Result<Vec<GitBlameLine>, String> {
+    safe_relative_path(root, path)?;
+    let out = git_command(root)
+        .args(["-c", "core.quotepath=false", "blame", "--porcelain", "--date=unix", "--"])
+        .arg(path)
+        .output()
+        .map_err(|e| format!("git 不可用: {e}"))?;
+    if !out.status.success() { return Err(git_stderr(&out)); }
+
+    #[derive(Clone)]
+    struct Block {
+        hash: String,
+        line: usize,
+        author: String,
+        email: String,
+        time: i64,
+        summary: String,
+    }
+    let mut current = Block {
+        hash: String::new(), line: 0, author: "Unknown".to_string(), email: String::new(), time: 0, summary: String::new(),
+    };
+    let mut started = false;
+    let mut result = Vec::new();
+    for raw in String::from_utf8_lossy(&out.stdout).lines() {
+        if let Some(raw_line) = raw.strip_prefix('\t') {
+            if started {
+                current.line = result.len() + 1;
+                result.push(GitBlameLine {
+                    line: current.line,
+                    hash: current.hash.clone(),
+                    short_hash: current.hash.chars().take(8).collect(),
+                    author_name: current.author.clone(),
+                    author_email: current.email.clone(),
+                    timestamp: current.time,
+                    summary: current.summary.clone(),
+                });
+            }
+            let _ = raw_line;
+            continue;
+        }
+        if let Some((hash, _orig, current_line)) = is_blame_revision(raw) {
+            current.hash = hash;
+            current.line = current_line;
+            started = true;
+            continue;
+        }
+        if let Some(value) = raw.strip_prefix("author ") { current.author = value.to_string(); }
+        else if let Some(value) = raw.strip_prefix("author-mail ") {
+            current.email = value.trim().trim_start_matches('<').trim_end_matches('>').to_string();
+        }
+        else if let Some(value) = raw.strip_prefix("author-time ") { current.time = value.parse().unwrap_or(0); }
+        else if let Some(value) = raw.strip_prefix("summary ") { current.summary = value.to_string(); }
+    }
+    Ok(result)
+}
+
+fn char_slice(source: &str, start: usize, end: usize) -> &str {
+    let max = source.len();
+    let mut left = start.min(max);
+    let mut right = end.min(max);
+    while left > 0 && !source.is_char_boundary(left) { left -= 1; }
+    while right < max && !source.is_char_boundary(right) { right += 1; }
+    &source[left..right]
+}
+
+fn line_text(source: &str, line_number: usize) -> (usize, String) {
+    let mut line = 1usize;
+    let mut start = 0usize;
+    for (offset, ch) in source.char_indices() {
+        if line == line_number { start = offset; break; }
+        if ch == '\n' { line += 1; }
+    }
+    if line != line_number { return (source.len(), String::new()); }
+    let end = source[start..].find('\n').map(|p| start + p).unwrap_or(source.len());
+    (line_number, char_slice(source, start, end).trim().to_string())
+}
+
+fn workspace_symbols_from_root(root: &std::path::Path) -> Result<Vec<Symbol>, String> {
+    WORKSPACES.lock()
+        .map_err(|_| "workspace lock poisoned".to_string())?
+        .values()
+        .find(|entry| entry.root == root)
+        .map(|entry| entry.symbols.clone())
+        .ok_or_else(|| "workspace is not open".to_string())
+}
+
+fn extract_unsupported_function_body(source: &str, name: &str) -> Option<(usize, usize)> {
+    let escaped = regex::escape(name);
+    let word = regex::Regex::new(&format!(r"\b{}\b", escaped)).ok()?;
+    let mut declaration_at: Option<usize> = None;
+    for capture in word.captures_iter(source) {
+        let at = capture.get(0)?.start();
+        let line_start = source[..at].rfind('\n').map(|p| p + 1).unwrap_or(0);
+        let line_end = source[at..].find('\n').map(|p| at + p).unwrap_or(source.len());
+        let line = source[line_start..line_end].trim_start();
+        let looks_like_declaration = ["fn ", "pub fn ", "function ", "def ", "class ", "const "]
+            .iter().any(|prefix| line.starts_with(prefix));
+        if looks_like_declaration {
+            declaration_at = Some(at);
+            break;
+        }
+        if declaration_at.is_none() { declaration_at = Some(at); }
+    }
+    let declaration_at = declaration_at?;
+    let brace_at = source[declaration_at..].find('{').map(|p| declaration_at + p)?;
+    let mut depth = 0usize;
+    let mut in_string: Option<char> = None;
+    let mut escaped = false;
+    let mut in_line_comment = false;
+    let mut in_block_comment = false;
+    let bytes: Vec<(usize, char)> = source.char_indices().collect();
+    let mut index = source[..brace_at].chars().count();
+    while index < bytes.len() {
+        let ch = bytes[index].1;
+        let next = bytes.get(index + 1).map(|(_, c)| *c);
+        if in_line_comment {
+            if ch == '\n' { in_line_comment = false; }
+        } else if in_block_comment {
+            if ch == '*' && next == Some('/') { in_block_comment = false; index += 1; }
+        } else if let Some(quote) = in_string {
+            if escaped { escaped = false; }
+            else if ch == '\\' { escaped = true; }
+            else if ch == quote { in_string = None; }
+        } else if ch == '/' && next == Some('/') {
+            in_line_comment = true; index += 1;
+        } else if ch == '/' && next == Some('*') {
+            in_block_comment = true; index += 1;
+        } else if ch == '"' || ch == '\'' {
+            in_string = Some(ch);
+        } else if ch == '{' {
+            depth += 1;
+        } else if ch == '}' {
+            depth = depth.saturating_sub(1);
+            if depth == 0 {
+                let mut end = bytes.get(index).map(|(offset, _)| offset + 1).unwrap_or(source.len());
+                while end > 0 && !source.is_char_boundary(end) { end -= 1; }
+                let line_start = source[..declaration_at].rfind('\n').map(|p| p + 1).unwrap_or(0);
+                return Some((line_start, end));
+            }
+        }
+        index += 1;
+    }
+    Some((declaration_at, source.len()))
+}
+
+pub fn call_hierarchy_in(
+    root: &std::path::Path,
+    path: &str,
+    start: usize,
+    end: Option<usize>,
+    direction: &str,
+    clicked_name: Option<&str>,
+) -> Result<Vec<CallHierarchyTarget>, String> {
+    let target = safe_relative_path(root, path)?;
+    let (content, _) = read_text_file(&target).ok_or_else(|| "file is missing, binary, or too large".to_string())?;
+    let clicked_offset = end.unwrap_or(start).min(content.len());
+    let clicked_name = clicked_name
+        .filter(|v| !v.trim().is_empty())
+        .map(str::trim)
+        .map(str::to_string)
+        .or_else(|| symbol_at(&content, clicked_offset))
+        .or_else(|| symbol_at(&content, start))
+        .ok_or_else(|| "请先选中一个函数、方法或类".to_string())?;
+    let symbols = workspace_symbols_from_root(root)?;
+
+    let selected = symbols.iter()
+        .filter(|symbol| symbol.path == path && symbol.name == clicked_name)
+        .find(|symbol| symbol.start_line + 1 <= content[..clicked_offset].matches('\n').count() + 1)
+        .or_else(|| symbols.iter().find(|symbol| symbol.path == path && symbol.name == clicked_name))
+        .cloned()
+        .unwrap_or_else(|| {
+            let mut symbol = Symbol {
+                path: path.to_string(), name: clicked_name.clone(), kind: "symbol".to_string(),
+                start: 0, end: content.len(), start_line: 0, start_column: 0,
+                end_line: content.matches('\n').count() + 1, end_column: 0,
+            };
+            if let Some((body_start, body_end)) = extract_unsupported_function_body(&content, &clicked_name) {
+                symbol.start = body_start;
+                symbol.end = body_end;
+            }
+            symbol
+        });
+
+    let callish = |kind: &str, column: usize| matches!(kind, "function" | "method" | "class" | "interface" | "type")
+        || (kind == "constant" && column == 0);
+    let regex_name = regex::escape(&clicked_name);
+    let occurrence_re = regex::Regex::new(&format!(r"\b{}\b", regex_name)).map_err(|e| e.to_string())?;
+    let identifier_re = regex::Regex::new(r"\b[A-Za-z_$][A-Za-z0-9_$]*\b").map_err(|e| e.to_string())?;
+    let relative_line = |source: &str, byte_offset: usize| source[..byte_offset].matches('\n').count() + 1;
+
+    if direction == "outgoing" {
+        let body = char_slice(&content, selected.start, selected.end.max(selected.start));
+        let mut targets: Vec<CallHierarchyTarget> = Vec::new();
+        for capture in identifier_re.captures_iter(body) {
+            let name = capture[0].to_string();
+            let symbol = symbols.iter().find(|s| s.name == name && callish(s.kind.as_str(), s.start_column));
+            let Some(symbol) = symbol else { continue };
+            if name == clicked_name { continue; }
+            let (reference_line, reference_text) = line_text(body, relative_line(body, capture.get(0).unwrap().start()));
+            if targets.iter().any(|t| t.path == symbol.path && t.name == symbol.name && t.start == symbol.start) { continue; }
+            targets.push(CallHierarchyTarget {
+                name: symbol.name.clone(), kind: symbol.kind.clone(), path: symbol.path.clone(),
+                start: symbol.start, end: symbol.end, start_line: symbol.start_line + 1,
+                start_column: symbol.start_column + 1, reference_line, reference_text,
+            });
+            if targets.len() >= 200 { break; }
+        }
+        return Ok(targets);
+    }
+
+    let mut targets: Vec<CallHierarchyTarget> = Vec::new();
+    let walker = ignore::WalkBuilder::new(root)
+        .hidden(true).git_ignore(true).git_global(true).git_exclude(true)
+        .parents(true).require_git(false).build();
+    for entry in walker.flatten() {
+        if !entry.path().is_file() { continue; }
+        let Some((source, false)) = read_text_file(entry.path()) else { continue };
+        let relative = entry.path().strip_prefix(root).map(|p| p.to_string_lossy().replace('\\', "/")).unwrap_or_default();
+        if relative.is_empty() { continue; }
+        let mut occurrences: Vec<(usize, usize)> = Vec::new();
+        for capture in occurrence_re.captures_iter(&source) {
+            let at = capture.get(0).unwrap().start();
+            let line = relative_line(&source, at);
+            occurrences.push((at, line));
+        }
+        if occurrences.is_empty() { continue; }
+        let path_symbols: Vec<&Symbol> = symbols.iter().filter(|s| s.path == relative && callish(s.kind.as_str(), s.start_column)).collect();
+        for (offset, line) in occurrences {
+            let enclosing = path_symbols.iter().rev().find(|symbol| symbol.start <= offset && offset <= symbol.end);
+            let (name, kind, decl_start, decl_end, decl_line, decl_column) = match enclosing {
+                Some(symbol) => (symbol.name.clone(), symbol.kind.clone(), symbol.start, symbol.end, symbol.start_line + 1, symbol.start_column + 1),
+                None => ("<file>".to_string(), "file".to_string(), 0, 0, 1, 1),
+            };
+            if name == selected.name && relative == path && decl_start == selected.start { continue; }
+            let (_, reference_text) = line_text(&source, line);
+            if targets.iter().any(|t| t.path == relative && t.reference_line == line && t.name == name) { continue; }
+            targets.push(CallHierarchyTarget {
+                name, kind, path: relative.clone(), start: decl_start, end: decl_end,
+                start_line: decl_line, start_column: decl_column, reference_line: line, reference_text,
+            });
+            if targets.len() >= 300 { break; }
+        }
+        if targets.len() >= 300 { break; }
+    }
+    Ok(targets)
+}
+
+#[tauri::command]
+pub fn git_working_changes(workspace_id: String) -> Result<Vec<GitFileChange>, String> {
+    let root = workspace_root(&workspace_id)?;
+    git_working_changes_in(&root)
+}
+
+#[tauri::command]
+pub fn git_working_diff(workspace_id: String, path: String) -> Result<String, String> {
+    let root = workspace_root(&workspace_id)?;
+    safe_relative_path(&root, &path)?;
+    git_working_diff_in(&root, &path)
+}
+
+#[tauri::command]
+pub fn git_blame(workspace_id: String, path: String) -> Result<Vec<GitBlameLine>, String> {
+    let root = workspace_root(&workspace_id)?;
+    git_blame_in(&root, &path)
+}
+
+#[tauri::command]
+pub fn call_hierarchy(
+    workspace_id: String,
+    path: String,
+    start: usize,
+    end: Option<usize>,
+    direction: String,
+    name: Option<String>,
+) -> Result<Vec<CallHierarchyTarget>, String> {
+    let root = workspace_root(&workspace_id)?;
+    safe_relative_path(&root, &path)?;
+    call_hierarchy_in(&root, &path, start, end, &direction, name.as_deref())
 }
 
 #[tauri::command]
