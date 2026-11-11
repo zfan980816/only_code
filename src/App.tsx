@@ -154,6 +154,8 @@ export default function App() {
   const codeRef = useRef<HTMLPreElement>(null);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [wsMenuOpen, setWsMenuOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editContent, setEditContent] = useState("");
   const [outlineVisible, setOutlineVisible] = useState(true);
   const [searchQ, setSearchQ] = useState("");
   const [results, setResults] = useState<SRes["results"]>([]);
@@ -354,6 +356,7 @@ export default function App() {
 
   useEffect(() => { localStorage.setItem("lr-font-size", String(codeFontSize)); }, [codeFontSize]);
   
+  
   // Session restore: on startup, reopen last workspace + tabs
   useEffect(() => {
     const savedWs = localStorage.getItem("lr-last-ws");
@@ -407,7 +410,7 @@ export default function App() {
     try {
       setErr(null); setStatus(`Loading...`);
       const d = await call<Doc>("file_read", { workspaceId: ws.id, path });
-      setDoc(d); setRefs([]); setDefs([]); setFileSearch(""); setFileSearchVisible(false); setCursor({line:1,col:1}); _inMultiLine = false;
+      setDoc(d); setRefs([]); setDefs([]); setFileSearch(""); setFileSearchVisible(false); setCursor({line:1,col:1}); _inMultiLine = false; setEditing(false);
       const name = path.split("/").pop() || path;
       setTabs(prev => {
         if (prev.some(tb => tb.path === path)) return prev;
@@ -430,7 +433,7 @@ export default function App() {
     setActiveTab(idx);
     try {
       const d = await call<Doc>("file_read", { workspaceId: ws.id, path: tabs[idx].path });
-      setDoc(d);
+      setDoc(d); setEditing(false);
       try { setSyms(await call<Sym[]>("outline", { workspaceId: ws.id, path: tabs[idx].path })); } catch { setSyms([]); }
       setStatus(`${tabs[idx].path} · ${d.language}`);
     } catch (e) { setStatus(`ERR: ${e}`); }
@@ -460,6 +463,29 @@ export default function App() {
     const timer = setTimeout(() => doSearch(searchQ), 250);
     return () => clearTimeout(timer);
   }, [searchQ, searchModalOpen, ws, doSearch]);
+  
+  const startEdit = useCallback(() => { if (doc) { setEditContent(doc.content); setEditing(true); } }, [doc]);
+  const cancelEdit = useCallback(() => setEditing(false), []);
+  const saveEdit = useCallback(async () => {
+    if (!ws || !activeTabData?.path || !editing) return;
+    try {
+      await call("file_write", { workspaceId: ws.id, path: activeTabData.path, content: editContent });
+      setEditing(false);
+      setStatus(`已保存 ${activeTabData.path}`);
+      const d = await call<Doc>("file_read", { workspaceId: ws.id, path: activeTabData.path });
+      setDoc(d); _inMultiLine = false;
+      try { setSyms(await call<Sym[]>("outline", { workspaceId: ws.id, path: activeTabData.path })); } catch {}
+    } catch (e) { setStatus(`保存失败: ${e}`); }
+  }, [ws, activeTabData, editing, editContent]);
+
+  // Ctrl+S save while editing
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (editing && e.ctrlKey && e.key.toLowerCase() === "s") { e.preventDefault(); saveEdit(); }
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [editing, saveEdit]);
   
   const findRefs = useCallback(async (name: string) => {
     if (!ws || !name.trim()) return;
@@ -921,8 +947,11 @@ export default function App() {
                 </div>
               )}
               <div className="doc-hdr">
-                <span>{activeTabData?.path}</span>
+                <span>{activeTabData?.path}{editing && editContent !== doc?.content ? " •未保存" : ""}</span>
                 <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                  {!editing && <button className="btn-mini" onClick={startEdit}>编辑</button>}
+                  {editing && <button className="btn-mini save" onClick={saveEdit}>保存</button>}
+                  {editing && <button className="btn-mini" onClick={cancelEdit}>取消</button>}
                   <button className="btn-mini" onClick={() => { const p = activeTabData?.path; if (p) toggleBm(p); }}>{isBm ? "★" : "☆"}</button>
                   <span className="lang-tag">{doc.language}</span>
                 </div>
@@ -941,6 +970,24 @@ export default function App() {
                   <button className="btn-mini" onClick={() => { setFileSearchVisible(false); setFileSearch(""); setMatchIdx(0); }}>✕</button>
                 </div>
               )}
+              {editing ? (
+                <textarea
+                  className="code-edit"
+                  value={editContent}
+                  onChange={e => setEditContent(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === "Tab") {
+                      e.preventDefault();
+                      const ta = e.currentTarget;
+                      const st = ta.selectionStart, en = ta.selectionEnd;
+                      setEditContent(v => v.slice(0, st) + "    " + v.slice(en));
+                      requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = st + 4; });
+                    }
+                  }}
+                  spellCheck={false} wrap="off" autoFocus
+                  style={{ fontSize: `${codeFontSize}px` }}
+                />
+              ) : (
               <pre ref={codeRef} className="code" onScroll={onCodeScroll} style={{ fontSize: `${codeFontSize}px`, "--code-line-h": `${codeLineH}px` } as React.CSSProperties}>
                 {isLargeFile && visibleRange.start > 0 && <div style={{ height: visibleRange.start * codeLineH }} />}
                 {codeLines.slice(visibleRange.start, visibleRange.end).map((line, idx) => {
@@ -1039,6 +1086,7 @@ export default function App() {
                 })}
                 {isLargeFile && visibleRange.end < codeLines.length && <div style={{ height: (codeLines.length - visibleRange.end) * codeLineH }} />}
               </pre>
+              )}
             </>
           ) : <div className="no-file">{t("noFile")}</div>}
         </section>
@@ -1183,6 +1231,8 @@ export default function App() {
     </div>
   );
 }
+
+
 
 
 

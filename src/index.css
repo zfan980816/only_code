@@ -830,3 +830,25 @@ html, body, #root { height: 100vh; overflow: hidden; }
   transition: all 0.12s ease;
 }
 .outline-show:hover { color: var(--text); background: #EAEAE8; }
+
+
+/* ── Edit mode ── */
+.code-edit {
+  flex: 1; width: 100%;
+  border: 0; outline: none; resize: none;
+  padding: 14px 16px;
+  font-family: "Cascadia Code", "JetBrains Mono", "Fira Code", Consolas, "Courier New", monospace;
+  line-height: 1.7;
+  color: var(--text);
+  background: var(--surface);
+  white-space: pre;
+  overflow: auto;
+  tab-size: 4;
+}
+.btn-mini.save {
+  background: #16A34A;
+  border-color: #16A34A;
+  color: #fff;
+  font-weight: 600;
+}
+.btn-mini.save:hover { background: #15803D; color: #fff; }

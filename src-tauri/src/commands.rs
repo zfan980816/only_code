@@ -189,6 +189,17 @@ pub fn file_read(workspace_id: String, path: String) -> Result<FileDocument, Str
 }
 
 #[tauri::command]
+pub fn file_write(workspace_id: String, path: String, content: String) -> Result<(), String> {
+    let root = workspace_root(&workspace_id)?;
+    let target = safe_relative_path(&root, &path)?;
+    if !target.is_file() {
+        return Err("target is not an existing file".to_string());
+    }
+    std::fs::write(&target, content.as_bytes()).map_err(|e| format!("cannot write file: {e}"))?;
+    Ok(())
+}
+
+#[tauri::command]
 pub fn highlight(workspace_id: String, path: String) -> Result<Vec<HighlightSpan>, String> {
     let root = workspace_root(&workspace_id)?;
     let target = safe_relative_path(&root, &path)?;

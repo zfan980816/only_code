@@ -17,6 +17,7 @@ pub fn run() {
             commands::workspace_open,
             commands::file_tree,
             commands::file_read,
+            commands::file_write,
             commands::highlight,
             commands::outline,
             commands::search,
