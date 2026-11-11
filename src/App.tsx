@@ -315,7 +315,8 @@ export default function App() {
       setFoldedLines(new Set()); setHighlightWord(""); setCurrentLine(0); setJumpTarget(null);
       setStatus(`${w.name} · ${w.indexedFiles} indexed`);
       setWsList(prev => {
-        const next = [{ root, name: w.name }, ...prev.filter(x => normPath(x.root) !== normPath(root))];
+        const exists = prev.some(x => normPath(x.root) === normPath(root));
+        const next = exists ? prev : [{ root, name: w.name }, ...prev];
         localStorage.setItem("lr-ws-list", JSON.stringify(next));
         return next;
       });
@@ -1171,6 +1172,8 @@ export default function App() {
     </div>
   );
 }
+
+
 
 
 
