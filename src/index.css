@@ -813,3 +813,20 @@ html, body, #root { height: 100vh; overflow: hidden; }
 
 
 
+
+
+/* ── Outline panel header + collapse ── */
+.outline-hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.outline-hdr h4 { margin-bottom: 0; }
+.outline-hdr .icon-btn { width: 24px; height: 24px; }
+.outline-show {
+  width: 24px;
+  padding: 12px 4px;
+  border: 0; border-radius: 0 8px 8px 0;
+  background: #F0F0EE;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.12s ease;
+}
+.outline-show:hover { color: var(--text); background: #EAEAE8; }

@@ -154,6 +154,7 @@ export default function App() {
   const codeRef = useRef<HTMLPreElement>(null);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [wsMenuOpen, setWsMenuOpen] = useState(false);
+  const [outlineVisible, setOutlineVisible] = useState(true);
   const [searchQ, setSearchQ] = useState("");
   const [results, setResults] = useState<SRes["results"]>([]);
   const [focus, setFocus] = useState(false);
@@ -1042,18 +1043,22 @@ export default function App() {
           ) : <div className="no-file">{t("noFile")}</div>}
         </section>
 
-        <div className={`resize-handle resize-right ${isResizing === "right" ? "active" : ""}`}
-          onMouseDown={() => setIsResizing("right")} />
-        {!focus && (
-          <aside className="right" style={{ width: rightWidth, minWidth: 160, maxWidth: 500 }}>
-            <div className="panel">
+        {!focus && outlineVisible && (
+          <>
+            <div className={`resize-handle resize-right ${isResizing === "right" ? "active" : ""}`}
+              onMouseDown={() => setIsResizing("right")} />
+            <aside className="right" style={{ width: rightWidth, minWidth: 160, maxWidth: 500 }}>
+            <div className="outline-hdr">
               <h4>{t("outline")}</h4>
+              <button className="icon-btn" onClick={() => setOutlineVisible(false)} title="收起大纲">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+              </button>
+            </div>
               <input className="outline-filter" value={outlineFilter} placeholder="filter symbols…"
                 onChange={e => setOutlineFilter(e.target.value)} />
               {syms.length===0 ? <span className="muted">{t("noSyms")}</span> :
                 filteredSymTree.map(n => renderOutlineSym(n, 0))}
               {syms.length>0 && <button className="find-refs-btn" onClick={() => syms[0] && findRefs(syms[0].name)}>{t("findRefs")} →</button>}
-            </div>
             {refs.length > 0 && (
               <div className="panel">
                 <h4>{t("refsFor")}: {refTarget}</h4>
@@ -1076,7 +1081,13 @@ export default function App() {
                 ))}
               </div>
             )}
-          </aside>
+            </aside>
+          </>
+        )}
+        {!focus && !outlineVisible && (
+          <button className="outline-show" onClick={() => setOutlineVisible(true)} title="展开大纲">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+          </button>
         )}
       </main>
 
@@ -1172,6 +1183,7 @@ export default function App() {
     </div>
   );
 }
+
 
 
 
