@@ -16,7 +16,7 @@
 - 块注释（`/* */`、JSDoc）与行注释统一着色
 - 浏览历史 Back / Forward，支持跳转后回退和前进
 - Git History：提交图、搜索/Hash 查找、分支/作者/日期/路径过滤、提交详情、变更文件分组和逐文件 diff
-- Git 未提交修改：Working Tree vs HEAD 的文件列表和 diff
+- Git 未提交修改：Working Tree vs HEAD 的文件列表和 diff；文件树内直接显示修改/新增角标
 - 明 / 暗主题，IDE 风格三栏布局，可拖拽调整侧栏宽度
 - 本地设置：界面语言、主题、代码字号/字体/行距、行号、当前行高亮、会话恢复、删除确认
 
@@ -244,7 +244,7 @@ Windows 下缺少 Visual Studio Build Tools。安装 [VS Build Tools](https://vi
 - [x] Git 提交历史与工作区 diff 视图
 - [x] 浏览历史前进 / 后退
 - [x] 更多语言高亮（Rust / Go / C/C++ / JSON / CSS / HTML 等）
-- [ ] 文件树 Git 状态标记
+- [x] 文件树 Git 状态标记（修改/新增角标，目录包含变更时显示圆点）
 - [ ] 插件系统与可选 LSP
 
 ## 贡献

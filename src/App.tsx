@@ -555,6 +555,8 @@ export default function App() {
               try { next[dir] = await call<N[]>("file_tree", { workspaceId: ws.id, path: dir }); } catch {}
             }
             setExpanded(next);
+            // Keep file-tree git badges in sync with the working tree
+            try { setWorkingFiles(await call<GitFileChange[]>("git_working_changes", { workspaceId: ws.id })); } catch { setWorkingFiles([]); }
           })();
           return prev;
         });
@@ -581,6 +583,7 @@ export default function App() {
       setWs(w); setTabs([]); setActiveTab(0); setDoc(null); setSyms([]); setResults([]); setSearchQ(""); setRefs([]); setDefs([]);
       setTree([{ name: w.name, path: "", isDir: true }]); setExpanded({});
       try { const ch = await call<N[]>("file_tree", { workspaceId: w.id }); setExpanded({ "": ch }); } catch {}
+      try { setWorkingFiles(await call<GitFileChange[]>("git_working_changes", { workspaceId: w.id })); } catch { setWorkingFiles([]); }
       setFoldedLines(new Set()); setHighlightWord(""); setCurrentLine(0); setJumpTarget(null);
       setStatus(`${w.name} · ${w.indexedFiles} indexed`);
       setWsList(prev => {
@@ -1303,7 +1306,13 @@ export default function App() {
         style={{ paddingLeft: 8 + depth * 16 }}
         onClick={() => n.isDir ? loadDir(n.path) : openFile(n.path)}>
         <span className="tree-icon">{n.isDir ? (expanded[n.path] ? "▾" : "▸") : "•"}</span>
-        {n.name}
+        <span className="tree-name">{n.name}</span>
+        {!n.isDir && gitStatusByPath.get(n.path) && (
+          <span className={`git-status st-${gitStatusByPath.get(n.path)}`} title="未提交修改">{gitStatusByPath.get(n.path)}</span>
+        )}
+        {n.isDir && gitDirsWithChanges.has(n.path) && (
+          <span className="git-dir-dot" title="包含未提交修改">●</span>
+        )}
       </button>
       {active && (
         <div className="row-ops">
@@ -1316,6 +1325,23 @@ export default function App() {
   ); });
 
   const symTree = useMemo(() => buildSymTree(syms), [syms]);
+
+  // File-tree git badges: changed file -> status letter, plus dirs containing changes
+  const gitStatusByPath = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const f of workingFiles) m.set(f.path, (f.status || "M")[0].toUpperCase());
+    return m;
+  }, [workingFiles]);
+  const gitDirsWithChanges = useMemo(() => {
+    const s = new Set<string>();
+    for (const p of gitStatusByPath.keys()) {
+      const parts = p.split("/");
+      parts.pop();
+      let cur = "";
+      for (const part of parts) { cur = cur ? `${cur}/${part}` : part; s.add(cur); }
+    }
+    return s;
+  }, [gitStatusByPath]);
   const filteredSymTree = useMemo(() => {
     if (!outlineFilter.trim()) return symTree;
     const q = outlineFilter.toLowerCase();

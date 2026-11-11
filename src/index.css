@@ -147,6 +147,9 @@ html, body, #root { height: 100vh; overflow: hidden; }
   transition: background 0.1s ease;
 }
 .tree-row:hover { background: var(--hover); color: var(--text); }
+.tree-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-row .git-status { margin-left: auto; flex-shrink: 0; }
+.git-dir-dot { margin-left: auto; flex-shrink: 0; font-size: 8px; color: var(--warn); line-height: 1; }
 .tree-active { color: var(--accent); font-weight: 600; background: var(--accent-light); }
 .tree-icon { width: 16px; color: var(--muted); text-align: center; flex-shrink: 0; font-size: 11px; }
 .bm-star { color: var(--warn); margin-left: auto; font-size: 11px; }
