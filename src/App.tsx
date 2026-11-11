@@ -112,6 +112,7 @@ const KW: Record<string, string[]> = {
 };
 
 let _inMultiLine = false;
+let _inBlockComment = false;
 const OVERSCAN = 20; // extra lines rendered above/below viewport
 
 function hl(line: string, lang: string): { text: string; cls: string }[] {
@@ -131,15 +132,29 @@ function hl(line: string, lang: string): { text: string; cls: string }[] {
     r.push({ text: line, cls: "hl-str" });
     return r;
   }
-  
+
+  // Block comment tracking (/* ... */ spanning lines, e.g. JSDoc / docblocks)
+  if (_inBlockComment) {
+    const end = line.indexOf("*/");
+    if (end >= 0) {
+      _inBlockComment = false;
+      const commentPart = line.slice(0, end + 2);
+      const rest = line.slice(end + 2);
+      return [{ text: commentPart, cls: "hl-cmt" }, ...hl(rest, lang)];
+    }
+    r.push({ text: line, cls: "hl-cmt" });
+    return r;
+  }
+
   // Whole-line comment (starts with # or //)
   if (trimmed.startsWith("#") || trimmed.startsWith("//")) {
     r.push({ text: line, cls: "hl-cmt" });
     return r;
   }
   
-  // For lines with inline comments, split at first # that's outside strings
+  // Find first comment start (# // /*) outside strings
   let commentStart = -1;
+  let blockStart = -1;
   let inStr: string | null = null;
   for (let i = 0; i < line.length; i++) {
     const ch = line[i];
@@ -147,6 +162,22 @@ function hl(line: string, lang: string): { text: string; cls: string }[] {
     else if (ch === '"' || ch === "'" || ch === "`") inStr = ch;
     else if (ch === "#") { commentStart = i; break; }
     else if (ch === "/" && line[i+1] === "/") { commentStart = i; break; }
+    else if (ch === "/" && line[i+1] === "*") { blockStart = i; break; }
+  }
+  
+  // Block comment starts on this line
+  if (blockStart >= 0 && commentStart < 0) {
+    const end = line.indexOf("*/", blockStart + 2);
+    const before = line.slice(0, blockStart);
+    if (end >= 0) {
+      // Single-line block comment: /* ... */
+      const comment = line.slice(blockStart, end + 2);
+      const after = line.slice(end + 2);
+      return [...hl(before, lang), { text: comment, cls: "hl-cmt" }, ...hl(after, lang)];
+    }
+    _inBlockComment = true;
+    const comment = line.slice(blockStart);
+    return [...hl(before, lang), { text: comment, cls: "hl-cmt" }];
   }
   
   const codePart = commentStart >= 0 ? line.substring(0, commentStart) : line;
@@ -262,6 +293,7 @@ export default function App() {
   const [fileSearch, setFileSearch] = useState("");
   const [fileSearchVisible, setFileSearchVisible] = useState(false);
   const [matchIdx, setMatchIdx] = useState(0);
+  const [occurrenceIdx, setOccurrenceIdx] = useState(0);
   const [matchLines, setMatchLines] = useState<number[]>([]);
   const codeRef = useRef<HTMLPreElement>(null);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
@@ -579,7 +611,7 @@ export default function App() {
         const path = savedTabs[idx];
         try {
           const d = await call<Doc>("file_read", { workspaceId: w.id, path });
-          setDoc(d); _inMultiLine = false;
+          setDoc(d); _inMultiLine = false; _inBlockComment = false;
           try { setSyms(await call<Sym[]>("outline", { workspaceId: w.id, path })); } catch { setSyms([]); }
           const tabIdx = savedTabs.indexOf(path);
           setActiveTab(tabIdx >= 0 ? tabIdx : 0);
@@ -615,7 +647,7 @@ export default function App() {
     try {
       setErr(null); setStatus(`Loading...`);
       const d = await call<Doc>("file_read", { workspaceId: ws.id, path });
-      setDoc(d); setRefs([]); setDefs([]); setFileSearch(""); setFileSearchVisible(false); setCursor({line:target,col:1}); setCurrentLine(target); _inMultiLine = false; setEditing(false); if (!sameFile) setHighlightWord("");
+      setDoc(d); setRefs([]); setDefs([]); setFileSearch(""); setFileSearchVisible(false); setCursor({line:target,col:1}); setCurrentLine(target); _inMultiLine = false; _inBlockComment = false; setEditing(false); if (!sameFile) setHighlightWord(""); setOccurrenceIdx(0);
       const name = path.split("/").pop() || path;
       setTabs(prev => {
         if (prev.some(tb => tb.path === path)) return prev;
@@ -741,7 +773,7 @@ export default function App() {
       setEditing(false);
       setStatus(`已保存 ${activeTabData.path}`);
       const d = await call<Doc>("file_read", { workspaceId: ws.id, path: activeTabData.path });
-      setDoc(d); _inMultiLine = false;
+      setDoc(d); _inMultiLine = false; _inBlockComment = false;
       try { setSyms(await call<Sym[]>("outline", { workspaceId: ws.id, path: activeTabData.path })); } catch {}
     } catch (e) { setStatus(`保存失败: ${e}`); }
   }, [ws, activeTabData, editing, editContent]);
@@ -990,7 +1022,7 @@ export default function App() {
 
     setCursor({ line: lineIdx + 1, col: charIdx + 1 });
     setCurrentLine(lineIdx + 1);
-    setHighlightWord(word);
+    setHighlightWord(word); setOccurrenceIdx(0);
 
     // Ctrl+Alt+Click: Find Usages (IDEA style)
     if (e.ctrlKey && e.altKey) {
@@ -1185,7 +1217,7 @@ export default function App() {
     return (
       <div key={key}>
         <div className="sym-row" style={{ paddingLeft: 8 + depth * 14 }}
-          onClick={(e) => { if (hasChildren && (e.target as HTMLElement).classList.contains("outline-arrow")) { e.stopPropagation(); toggleOutline(key); } else { openFile(activeTabData?.path || "", s.startLine + 1); setHighlightWord(s.name); setCurrentLine(s.startLine + 1); } }}
+          onClick={(e) => { if (hasChildren && (e.target as HTMLElement).classList.contains("outline-arrow")) { e.stopPropagation(); toggleOutline(key); } else { openFile(activeTabData?.path || "", s.startLine + 1); setHighlightWord(s.name); setOccurrenceIdx(0); setCurrentLine(s.startLine + 1); } }}
           onContextMenu={(e) => { e.preventDefault(); findRefs(s.name); }}
           title={`${s.kind} · Click: jump · Click arrow: expand/collapse · Right-click: find refs`}>
           <span className={`outline-arrow ${hasChildren ? (isOpen ? "open" : "") : "leaf"}`}>{hasChildren ? (isOpen ? "▾" : "▸") : ""}</span>
@@ -1306,6 +1338,41 @@ export default function App() {
     if (pieces.length === 0) return plain;
     return <span key={j} className={tk.cls || undefined}>{pieces}</span>;
   }, [highlightWord]);
+
+  // F3 / Shift+F3: cycle between exact occurrences of the clicked word (IDEA-style)
+  const occLines = useMemo(() => [...highlightOccurrences.lines].sort((a, b) => a - b), [highlightOccurrences]);
+  const goOccurrence = useCallback((dir: number) => {
+    if (occLines.length === 0) return;
+    let next = occurrenceIdx + dir;
+    if (next < 0) next = occLines.length - 1;
+    if (next >= occLines.length) next = 0;
+    setOccurrenceIdx(next);
+    const targetLine = occLines[next];
+    setCurrentLine(targetLine);
+    setCursor({ line: targetLine, col: 1 });
+    const codeEl = codeRef.current;
+    if (codeEl) {
+      if (isLargeFile) {
+        codeEl.scrollTop = Math.max(0, (targetLine - 1) * codeLineH - codeEl.clientHeight / 2);
+      } else {
+        const lineEl = codeEl.querySelector(`.code-line:nth-child(${targetLine})`);
+        if (lineEl) lineEl.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    }
+  }, [occLines, occurrenceIdx, isLargeFile, codeLineH]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== "F3") return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      if (!highlightWord || occLines.length === 0) return;
+      e.preventDefault();
+      goOccurrence(e.shiftKey ? -1 : 1);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [highlightWord, occLines, goOccurrence]);
 
   const onCodeScroll = useCallback((e: React.UIEvent<HTMLPreElement>) => {
     const el = e.currentTarget;
