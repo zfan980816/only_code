@@ -192,8 +192,8 @@ function hunkWordMarks(lines: DiffLine[]): Map<number, WdMark[]> {
     while (addStart < lines.length && lines[addStart].type === "add") addStart++;
     const pairs = Math.min(delEnd - i, addStart - j);
     for (let k = 0; k < pairs; k++) {
-      const d = lines[i + k], a = lines[addStart + k];
-      if (!d.content.trim() || !a.content.trim()) continue;
+      const d = lines[i + k], a = lines[j + k];
+      if (!d || !a || !d.content.trim() || !a.content.trim()) continue;
       const wd = wordDiffPair(d.content, a.content);
       if (wd.del.length) out.set(i + k, wd.del);
       if (wd.add.length) out.set(addStart + k, wd.add);
