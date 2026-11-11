@@ -29,3 +29,6 @@ src-tauri/gen/schemas
 
 .playwright-cli/
 *.bak
+
+# local UI test captures
+/screenshot-*.png

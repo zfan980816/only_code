@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8" /><title>Light Reader UI Test</title></head>
+<body><div id="root"></div>
+<script>
+window.__mockInvokes = [];
+window.__TAURI_INTERNALS__ = {
+  transformCallback(callback) {
+    const id = Math.floor(Math.random() * 1e9);
+    window[`_mockcb${id}`] = (arg) => callback(arg);
+    return id;
+  },
+  isTauri: () => true,
+  metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main" } },
+  plugins: {},
+  async invoke(cmd, args = {}) {
+    window.__mockInvokes.push([cmd, args]);
+    if (cmd === "plugin:dialog|open") return "/mock/project";
+    if (cmd === "workspace_open") return { id: "ws-test", root: "/mock/project", name: "project", indexedFiles: 2 };
+    if (cmd === "file_tree") return [
+      { name: "App.tsx", path: "App.tsx", isDir: false },
+      { name: "Service.ts", path: "Service.ts", isDir: false }
+    ];
+    if (cmd === "file_read") {
+      const isTarget = args.path === "Service.ts";
+      return { path: args.path, name: args.path, language: "typescript", size: 128, truncated: false,
+        content: isTarget
+          ? "class Service {\n  reloadAll(): void {\n    return;\n  }\n}\n"
+          : "import { Service } from './Service';\n\nconst service = new Service();\n\nfunction loadProject() {\n  service.reloadAll();\n}\n"
+      };
+    }
+    if (cmd === "outline") return [{ name: "Service", kind: "class", start: 0, startLine: 0, startColumn: 0 }];
+    if (cmd === "goto_definition") return [{ path: "Service.ts", name: "reloadAll", kind: "method", start: 18, end: 27, startLine: 1, startColumn: 2 }];
+    if (cmd === "find_references") return [{ path: "App.tsx", name: "reloadAll", kind: "method", start: 83, end: 92, startLine: 6, startColumn: 2 }];
+    return null;
+  }
+};
+</script>
+<script type="module">import("/src/main.tsx");</script>
+</body></html>
+
+

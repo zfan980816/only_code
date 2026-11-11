@@ -188,6 +188,106 @@ pub fn file_read(workspace_id: String, path: String) -> Result<FileDocument, Str
     })
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitFileChange {
+    pub path: String,
+    pub status: String,
+}
+
+#[tauri::command]
+pub fn file_create(workspace_id: String, path: String, content: Option<String>) -> Result<(), String> {
+    let root = workspace_root(&workspace_id)?;
+    let target = safe_relative_path(&root, &path)?;
+    if target.exists() {
+        return Err("file already exists".to_string());
+    }
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("cannot create parent dirs: {e}"))?;
+    }
+    std::fs::write(&target, content.unwrap_or_default().as_bytes())
+        .map_err(|e| format!("cannot create file: {e}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn file_delete(workspace_id: String, path: String) -> Result<(), String> {
+    let root = workspace_root(&workspace_id)?;
+    let target = safe_relative_path(&root, &path)?;
+    if !target.is_file() {
+        return Err("target is not a file".to_string());
+    }
+    std::fs::remove_file(target).map_err(|e| format!("cannot delete: {e}"))
+}
+
+#[tauri::command]
+pub fn file_rename(workspace_id: String, old_path: String, new_path: String) -> Result<(), String> {
+    let root = workspace_root(&workspace_id)?;
+    let from = safe_relative_path(&root, &old_path)?;
+    let to = safe_relative_path(&root, &new_path)?;
+    if !from.is_file() {
+        return Err("source file not found".to_string());
+    }
+    if to.exists() {
+        return Err("target already exists".to_string());
+    }
+    if let Some(parent) = to.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("cannot create parent dirs: {e}"))?;
+    }
+    std::fs::rename(from, to).map_err(|e| format!("cannot rename: {e}"))
+}
+
+#[tauri::command]
+pub fn git_changed_files(workspace_id: String) -> Result<Vec<GitFileChange>, String> {
+    use std::process::Command;
+    let root = workspace_root(&workspace_id)?;
+    if !root.join(".git").exists() {
+        return Err("此文件夹不是 Git 仓库".to_string());
+    }
+    let out = Command::new("git")
+        .args(["diff-tree", "--no-commit-id", "--name-status", "-r", "HEAD"])
+        .current_dir(&root)
+        .output()
+        .map_err(|e| format!("git 不可用: {e}"))?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut files = Vec::new();
+    for line in text.lines() {
+        let mut parts = line.splitn(2, '\t');
+        if let (Some(st), Some(p)) = (parts.next(), parts.next()) {
+            files.push(GitFileChange { path: p.to_string(), status: st.to_string() });
+        }
+    }
+    Ok(files)
+}
+
+#[tauri::command]
+pub fn git_file_diff(workspace_id: String, path: String) -> Result<String, String> {
+    use std::process::Command;
+    let root = workspace_root(&workspace_id)?;
+    let out = Command::new("git")
+        .args(["diff", "HEAD~1", "HEAD", "--"])
+        .arg(&path)
+        .current_dir(&root)
+        .output()
+        .map_err(|e| format!("git 不可用: {e}"))?;
+    if !out.status.success() {
+        let out2 = Command::new("git")
+            .args(["show", "HEAD", "--"])
+            .arg(&path)
+            .current_dir(&root)
+            .output()
+            .map_err(|e| format!("git 不可用: {e}"))?;
+        if !out2.status.success() {
+            return Err(String::from_utf8_lossy(&out2.stderr).trim().to_string());
+        }
+        return Ok(String::from_utf8_lossy(&out2.stdout).to_string());
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
 #[tauri::command]
 pub fn file_write(workspace_id: String, path: String, content: String) -> Result<(), String> {
     let root = workspace_root(&workspace_id)?;
@@ -299,7 +399,7 @@ pub fn resolve_definition(
 pub fn goto_definition(
     workspace_id: String,
     name: String,
-    current_path: String,
+    _current_path: String,
 ) -> Result<Vec<NavigationTarget>, String> {
     let root = workspace_root(&workspace_id)?;
     let symbols = workspace_symbols(&workspace_id)?;

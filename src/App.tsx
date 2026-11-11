@@ -114,7 +114,12 @@ function getWordIndex(text: string, clicked: number): { start: number; end: numb
 interface SymNode { sym: Sym; children: SymNode[]; }
 
 function normPath(p?: string): string {
-  return (p ?? "").replace(/^\\\\\?\\/, "").replace(/[\\/]+$/, "").toLowerCase();
+  return (p ?? "")
+    .replace(/\\/g, "/")
+    .replace(/^\/\/\?\//, "")
+    .replace(/\/{2,}/g, "/")
+    .replace(/\/$/, "")
+    .toLowerCase();
 }
 
 function buildSymTree(flat: Sym[]): SymNode[] {
@@ -135,6 +140,16 @@ function buildSymTree(flat: Sym[]): SymNode[] {
   }
   return roots;
 }
+function dedupeWorkspaces(list: Array<{root:string;name:string}>): Array<{root:string;name:string}> {
+  const seen = new Set<string>();
+  return (list || []).filter(w => {
+    const key = normPath(w.root);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export default function App() {
   const [lang, setLang] = useState<Lang>("zh");
   const t = (k: string) => (L[lang] as Record<string,string>)[k] ?? k;
@@ -154,15 +169,28 @@ export default function App() {
   const codeRef = useRef<HTMLPreElement>(null);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [wsMenuOpen, setWsMenuOpen] = useState(false);
+  const [dark, setDark] = useState(() => localStorage.getItem("lr-theme") === "dark");
+  const [gitOpen, setGitOpen] = useState(false);
+  const [gitFiles, setGitFiles] = useState<Array<{path:string;status:string}>>([]);
+  const [gitDiff, setGitDiff] = useState("");
+  const [gitSel, setGitSel] = useState("");
+  const [newFileOpen, setNewFileOpen] = useState(false);
+  const [newFileName, setNewFileName] = useState("");
+  const [renamingPath, setRenamingPath] = useState<string | null>(null);
+  const [renameVal, setRenameVal] = useState("");
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState("");
+  const [frOpen, setFrOpen] = useState(false);
+  const [frFind, setFrFind] = useState("");
+  const [frReplace, setFrReplace] = useState("");
+  const [frCase, setFrCase] = useState(false);
   const [outlineVisible, setOutlineVisible] = useState(true);
   const [searchQ, setSearchQ] = useState("");
   const [results, setResults] = useState<SRes["results"]>([]);
   const [focus, setFocus] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [bookmarks, setBookmarks] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem("lr-bm") ?? "[]"); } catch { return []; } });
-  const [wsList, setWsList] = useState<Array<{root:string;name:string}>>(() => { try { return JSON.parse(localStorage.getItem("lr-ws-list") ?? "[]"); } catch { return []; } });
+  const [wsList, setWsList] = useState<Array<{root:string;name:string}>>(() => { try { return dedupeWorkspaces(JSON.parse(localStorage.getItem("lr-ws-list") ?? "[]")); } catch { return []; } });
   const [refs, setRefs] = useState<NavTarget[]>([]);
   const [defs, setDefs] = useState<NavTarget[]>([]);
   const [refTarget, setRefTarget] = useState("");
@@ -182,6 +210,11 @@ export default function App() {
   const [scrollTop, setScrollTop] = useState(0);
   const [codeFontSize, setCodeFontSize] = useState<number>(() => { const v = parseInt(localStorage.getItem("lr-font-size") ?? "13"); return v >= 9 && v <= 32 ? v : 13; });
   const codeLineH = Math.round(codeFontSize * 1.7);
+  const editLines = useMemo(() => {
+    if (!doc) return [];
+    return editContent.split("\n").map(line => ({ tokens: hl(line, doc.language) }));
+  }, [editContent, doc]);
+  const editHlRef = useRef<HTMLPreElement>(null);
   const [viewportH, setViewportH] = useState(600);
   const [jumpTarget, setJumpTarget] = useState<{path:string; line:number} | null>(null);
   const [leftWidth, setLeftWidth] = useState(260);
@@ -228,7 +261,7 @@ export default function App() {
       if (e.ctrlKey && e.key === "f" && !e.shiftKey) { e.preventDefault(); setFileSearchVisible(true); setTimeout(() => fileSearchRef.current?.focus(), 50); }
       if (e.ctrlKey && e.shiftKey && e.key === "N") { e.preventDefault(); setSymOpen(true); setSymQ(""); setSymResults([]); setSymIdx(0); }
       if (e.ctrlKey && e.shiftKey && e.key === "F") { e.preventDefault(); setFocus(v=>!v); }
-      if (e.key === "Escape") { setQuickOpen(false); setFileSearchVisible(false); setFileSearch(""); setMatchIdx(0); setRefPopup(null); setSymOpen(false); setSearchModalOpen(false); setWsMenuOpen(false); }
+      if (e.key === "Escape") { setQuickOpen(false); setFileSearchVisible(false); setFileSearch(""); setMatchIdx(0); setRefPopup(null); setSymOpen(false); setSearchModalOpen(false); setWsMenuOpen(false); setGitOpen(false); }
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
@@ -286,12 +319,21 @@ export default function App() {
           return [...map.values()];
         });
       }));
-      unsubs.push(await listen<string>("files_changed", () => {
-        // Reload tree root + active file
-        call<N[]>("file_tree", { workspaceId: ws.id }).then(ch => {
-          setTree([{ name: ws.name, path: "", isDir: true }]);
-          setExpanded(p => { const c = { ...p, "": ch }; return c; });
-        }).catch(() => {});
+      unsubs.push(await listen<string>("files_changed", async () => {
+        // Reload every currently expanded directory, not just the workspace root,
+        // otherwise newly created files in an open folder never appear.
+        setExpanded(prev => {
+          const dirs = Object.keys(prev);
+          (async () => {
+            const next: Record<string, N[]> = { ...prev };
+            try { next[""] = await call<N[]>("file_tree", { workspaceId: ws.id }); } catch {}
+            for (const dir of dirs.filter(d => d)) {
+              try { next[dir] = await call<N[]>("file_tree", { workspaceId: ws.id, path: dir }); } catch {}
+            }
+            setExpanded(next);
+          })();
+          return prev;
+        });
         if (activeTabRef.current) {
           call<Doc>("file_read", { workspaceId: ws.id, path: activeTabRef.current })
             .then(d => setDoc(d)).catch(() => {});
@@ -319,7 +361,7 @@ export default function App() {
       setStatus(`${w.name} · ${w.indexedFiles} indexed`);
       setWsList(prev => {
         const exists = prev.some(x => normPath(x.root) === normPath(root));
-        const next = exists ? prev : [{ root, name: w.name }, ...prev];
+        const next = exists ? prev : dedupeWorkspaces([{ root, name: w.name }, ...prev]);
         localStorage.setItem("lr-ws-list", JSON.stringify(next));
         return next;
       });
@@ -356,7 +398,25 @@ export default function App() {
 
   useEffect(() => { localStorage.setItem("lr-font-size", String(codeFontSize)); }, [codeFontSize]);
   
+  // Dark mode
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", dark);
+    localStorage.setItem("lr-theme", dark ? "dark" : "light");
+  }, [dark]);
   
+  
+  // Drag-drop folder import
+  useEffect(() => {
+    let un: (() => void) | undefined;
+    import("@tauri-apps/api/webview").then(({ getCurrentWebview }) => {
+      getCurrentWebview().onDragDropEvent((ev: any) => {
+        if (ev.payload?.type === "drop" && ev.payload.paths?.[0]) {
+          openWorkspace(ev.payload.paths[0]);
+        }
+      }).then(fn => { un = fn; });
+    });
+    return () => { un?.(); };
+  }, [openWorkspace]);
   // Session restore: on startup, reopen last workspace + tabs
   useEffect(() => {
     const savedWs = localStorage.getItem("lr-last-ws");
@@ -477,15 +537,111 @@ export default function App() {
       try { setSyms(await call<Sym[]>("outline", { workspaceId: ws.id, path: activeTabData.path })); } catch {}
     } catch (e) { setStatus(`保存失败: ${e}`); }
   }, [ws, activeTabData, editing, editContent]);
+  const frMatches = useMemo(() => {
+    if (!frOpen || !frFind) return [] as number[];
+    const hay = frCase ? editContent : editContent.toLowerCase();
+    const needle = frCase ? frFind : frFind.toLowerCase();
+    const arr: number[] = [];
+    let i = hay.indexOf(needle);
+    while (i >= 0) { arr.push(i); i = hay.indexOf(needle, i + Math.max(1, needle.length)); }
+    return arr;
+  }, [frOpen, frFind, frCase, editContent]);
+  const frSelect = useCallback((idx: number) => {
+    const ta = document.querySelector<HTMLTextAreaElement>(".code-edit");
+    if (!ta || frMatches.length === 0) return;
+    const i = ((idx % frMatches.length) + frMatches.length) % frMatches.length;
+    ta.focus();
+    ta.setSelectionRange(frMatches[i], frMatches[i] + frFind.length);
+  }, [frMatches, frFind]);
+  const frReplaceOne = useCallback(() => {
+    const ta = document.querySelector<HTMLTextAreaElement>(".code-edit");
+    if (!ta || frMatches.length === 0 || !frFind) return;
+    const from = ta.selectionEnd;
+    let at = frMatches.findIndex(p => p >= from);
+    if (at < 0) at = 0;
+    const pos = frMatches[at];
+    setEditContent(v => v.slice(0, pos) + frReplace + v.slice(pos + frFind.length));
+    requestAnimationFrame(() => ta.setSelectionRange(pos, pos + frReplace.length));
+  }, [frMatches, frFind, frReplace]);
+  const frReplaceAll = useCallback(() => {
+    if (!frFind) return;
+    const re = new RegExp(frFind.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), frCase ? "g" : "gi");
+    setEditContent(v => v.replace(re, frReplace));
+  }, [frFind, frReplace, frCase]);
 
   // Ctrl+S save while editing
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if (editing && e.ctrlKey && e.key.toLowerCase() === "s") { e.preventDefault(); saveEdit(); }
+      if (editing && e.ctrlKey && e.key.toLowerCase() === "h") { e.preventDefault(); setFrOpen(v => !v); }
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
   }, [editing, saveEdit]);
+  
+  const openGit = useCallback(async () => {
+    setGitOpen(true); setGitFiles([]); setGitDiff(""); setGitSel("");
+    if (!ws) return;
+    try { setGitFiles(await call<Array<{path:string;status:string}>>("git_changed_files", { workspaceId: ws.id })); } catch (e) { setStatus(String(e)); }
+  }, [ws]);
+  const showGitDiff = useCallback(async (path: string) => {
+    if (!ws) return;
+    setGitSel(path);
+    try { setGitDiff(await call<string>("git_file_diff", { workspaceId: ws.id, path })); } catch (e) { setGitDiff(String(e)); }
+  }, [ws]);
+
+  const dirOf = (p?: string) => (p && p.includes("/")) ? p.slice(0, p.lastIndexOf("/")) : "";
+  const baseOf = (p: string) => p.split("/").pop() || p;
+  const refreshTreeDir = useCallback(async (dir: string, delayMs = 0) => {
+    if (!ws) return;
+    if (delayMs) await new Promise(r => setTimeout(r, delayMs));
+    const ch = dir ? await call<N[]>("file_tree", { workspaceId: ws.id, path: dir }) : await call<N[]>("file_tree", { workspaceId: ws.id });
+    setExpanded(p => ({ ...p, [dir]: ch }));
+  }, [ws]);
+
+  const createFile = useCallback(async () => {
+    if (!ws || !newFileName.trim()) return;
+    const dir = dirOf(activeTabData?.path);
+    const path = (dir ? dir + "/" : "") + newFileName.trim();
+    try {
+      await call("file_create", { workspaceId: ws.id, path, content: "" });
+      setNewFileOpen(false); setNewFileName("");
+      try { await refreshTreeDir(dir); setTimeout(() => { refreshTreeDir(dir).catch(() => {}); }, 500); } catch {}
+      openFile(path);
+    } catch (e) { setStatus(String(e)); }
+  }, [ws, newFileName, activeTabData, openFile, refreshTreeDir]);
+  const deleteFile = useCallback(async (path: string) => {
+    if (!ws) return;
+    try {
+      await call("file_delete", { workspaceId: ws.id, path });
+      setTabs(prev => {
+        const idx = prev.findIndex(t => t.path === path);
+        if (idx >= 0) closeTab(idx);
+        return prev;
+      });
+      {
+        const dir = dirOf(path);
+        try { await refreshTreeDir(dir); setTimeout(() => { refreshTreeDir(dir).catch(() => {}); }, 500); } catch {}
+      }
+      setStatus(`已删除 ${path}`);
+    } catch (e) { setStatus(String(e)); }
+  }, [ws, closeTab, dirOf, refreshTreeDir]);
+  const commitRename = useCallback(async () => {
+    if (!ws || !renamingPath || !renameVal.trim()) { setRenamingPath(null); return; }
+    const dir = dirOf(renamingPath);
+    const newPath = (dir ? dir + "/" : "") + renameVal.trim();
+    try {
+      await call("file_rename", { workspaceId: ws.id, oldPath: renamingPath, newPath });
+      setTabs(prev => prev.map(t => t.path === renamingPath ? { ...t, path: newPath, name: baseOf(newPath) } : t));
+      {
+        const dir = dirOf(newPath);
+        try { await refreshTreeDir(dir); setTimeout(() => { refreshTreeDir(dir).catch(() => {}); }, 500); } catch {}
+      }
+      if (doc?.path === renamingPath) openFile(newPath);
+      setStatus(`已重命名 ${renamingPath} → ${newPath}`);
+    } catch (e) { setStatus(String(e)); }
+    setRenamingPath(null);
+  }, [ws, renamingPath, renameVal, doc, openFile, dirOf, refreshTreeDir]);
   
   const findRefs = useCallback(async (name: string) => {
     if (!ws || !name.trim()) return;
@@ -742,7 +898,19 @@ export default function App() {
     );
   };
   
-  const renderTree = (nodes: N[], depth: number) => nodes.map(n => (
+  const renderTree = (nodes: N[], depth: number) => nodes.map(n => {
+    const active = doc?.path === n.path;
+    if (renamingPath === n.path) {
+      return (
+        <div key={n.path} className="tree-row renaming" style={{ paddingLeft: 8 + depth * 16 }}>
+          <input autoFocus className="rename-input" value={renameVal}
+            onChange={e => setRenameVal(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") commitRename(); if (e.key === "Escape") setRenamingPath(null); }}
+            onBlur={commitRename} spellCheck={false} />
+        </div>
+      );
+    }
+    return (
     <div key={n.path || n.name}>
       <button className={`tree-row ${activeTabData?.path === n.path && !n.isDir ? "tree-active" : ""}`}
         style={{ paddingLeft: 8 + depth * 16 }}
@@ -751,9 +919,15 @@ export default function App() {
         {n.name}
         {!n.isDir && bookmarks.includes(n.path) && <span className="bm-star">★</span>}
       </button>
+      {active && (
+        <div className="row-ops">
+          <button className="row-op" title="重命名" onClick={(e) => { e.stopPropagation(); setRenamingPath(n.path); setRenameVal(n.name); }}>✎</button>
+          <button className="row-op danger" title="删除" onClick={(e) => { e.stopPropagation(); if (confirm(`删除 ${n.path}?`)) deleteFile(n.path); }}>🗑</button>
+        </div>
+      )}
       {expanded[n.path]?.map(c => renderTree([c], depth + 1))}
     </div>
-  ));
+  ); });
 
   const symTree = useMemo(() => buildSymTree(syms), [syms]);
   const filteredSymTree = useMemo(() => {
@@ -801,9 +975,8 @@ export default function App() {
   }, []);
     // Scroll to jump target when doc changes
   useEffect(() => {
-    console.log("[scrollEffect] jumpTarget:", jumpTarget, "doc:", !!doc, "activePath:", activeTabData?.path);
     if (!jumpTarget || !doc || !codeRef.current) return;
-    if (jumpTarget.path !== activeTabData?.path) { console.log("[scrollEffect] path mismatch"); return; }
+    if (jumpTarget.path !== activeTabData?.path) return;
     const timer = setTimeout(() => {
       const codeEl = codeRef.current;
       if (!codeEl) return;
@@ -871,16 +1044,40 @@ export default function App() {
 
       <main className="layout">
         {!focus && (
+          <aside className="activity-rail">
+            <button className="rail-item on" onClick={() => setWsMenuOpen(v => !v)} title="文件">
+              <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+              <span>文件</span>
+            </button>
+            <button className="rail-item" onClick={() => setSearchModalOpen(true)} title="搜索">
+              <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7"/><line x1="20" y1="20" x2="16.65" y2="16.65"/></svg>
+              <span>搜索</span>
+            </button>
+            <button className={"rail-item " + (dark ? "on" : "")} onClick={() => setDark(v => !v)} title={dark ? "亮色模式" : "暗色模式"}>
+              {dark ? (
+                <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+              ) : (
+                <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+              )}
+              <span>{dark ? "亮色" : "暗色"}</span>
+            </button>
+          </aside>
+        )}
+        {!focus && (
           <aside className="left" style={{ width: leftWidth, minWidth: 160, maxWidth: 500 }}>
-            <div className="side-top">
-              <button className="ws-switcher" onClick={() => setWsMenuOpen(v => !v)} title="切换工作区">
-                <span className="lr-logo">LR</span>
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+            <div className="panel-hdr">
+              <button className="panel-open-btn" onClick={openFolder} title="打开文件夹">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
+                <span>打开文件夹</span>
+              </button>
+              <button className="icon-btn" onClick={openGit} title="Git 最近提交对比">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="6" y1="9" x2="6" y2="15"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
               </button>
             </div>
-            <button className="side-open-btn" onClick={openFolder}>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
-              打开文件夹
+            <button className="panel-search" onClick={() => { setQuickOpen(true); setQuickQ(""); setQuickResults([]); setQuickIdx(0); }} title="搜索文件">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7"/><line x1="20" y1="20" x2="16.65" y2="16.65"/></svg>
+              <span>搜索文件…</span>
+              <span className="panel-search-key">Ctrl+P</span>
             </button>
             {wsMenuOpen && (
               <>
@@ -896,6 +1093,9 @@ export default function App() {
                   <button className="ws-menu-item" onClick={() => { setWsMenuOpen(false); openFolder(); }}>打开文件夹…</button>
                   <button className="ws-menu-item" onClick={() => setLang(lang === "zh" ? "en" : "zh")}>
                     {lang === "zh" ? "切换到 English" : "切换到 中文"}
+                  </button>
+                  <button className="ws-menu-item" onClick={() => setDark(v => !v)}>
+                    {dark ? "切换到亮色模式" : "切换到暗色模式"}
                   </button>
                 </div>
               </>
@@ -920,7 +1120,19 @@ export default function App() {
               </div>
               {ws && expanded[""] && (
                 <>
-                  <div className="side-section-title">浏览</div>
+                  <div className="browse-hdr">
+                <div className="side-section-title" style={{ marginBottom: 0 }}>浏览</div>
+                <button className="icon-btn" title="新建文件" onClick={() => { setNewFileOpen(true); setNewFileName(""); }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
+                </button>
+              </div>
+              {newFileOpen && (
+                <div className="new-file-row">
+                  <input autoFocus className="rename-input" value={newFileName} placeholder="新文件名…" spellCheck={false}
+                    onChange={e => setNewFileName(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") createFile(); if (e.key === "Escape") setNewFileOpen(false); }} />
+                </div>
+              )}
                   <div className="tree">
                     {expanded[""].map(c => renderTree([c], 0))}
                   </div>
@@ -944,7 +1156,18 @@ export default function App() {
                       <button className="tab-close" onClick={(e) => { e.stopPropagation(); closeTab(i); }}>×</button>
                     </div>
                   ))}
+                <div className="tab-actions">
+                  <button className="icon-btn" title="新建文件" onClick={() => { setNewFileOpen(true); setNewFileName(""); }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+                  </button>
+                  <button className="icon-btn" title="搜索代码" onClick={() => setSearchModalOpen(true)}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7"/><line x1="20" y1="20" x2="16.65" y2="16.65"/></svg>
+                  </button>
+                  <button className={"icon-btn " + (dark ? "on" : "")} title={dark ? "切换亮色" : "切换暗色"} onClick={() => setDark(v => !v)}>
+                    {dark ? "☀" : "☾"}
+                  </button>
                 </div>
+              </div>
               )}
               <div className="doc-hdr">
                 <span>{activeTabData?.path}{editing && editContent !== doc?.content ? " •未保存" : ""}</span>
@@ -971,22 +1194,54 @@ export default function App() {
                 </div>
               )}
               {editing ? (
-                <textarea
-                  className="code-edit"
-                  value={editContent}
-                  onChange={e => setEditContent(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === "Tab") {
-                      e.preventDefault();
-                      const ta = e.currentTarget;
-                      const st = ta.selectionStart, en = ta.selectionEnd;
-                      setEditContent(v => v.slice(0, st) + "    " + v.slice(en));
-                      requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = st + 4; });
-                    }
-                  }}
-                  spellCheck={false} wrap="off" autoFocus
-                  style={{ fontSize: `${codeFontSize}px` }}
-                />
+                <div className="editor-wrap">
+                  {frOpen && (
+                    <div className="fr-bar">
+                      <input className="fr-input" value={frFind} placeholder="查找" spellCheck={false}
+                        onChange={e => setFrFind(e.target.value)}
+                        onKeyDown={e => { if (e.key === "Enter") frSelect(0); }} />
+                      <input className="fr-input" value={frReplace} placeholder="替换为" spellCheck={false}
+                        onChange={e => setFrReplace(e.target.value)} />
+                      <button className={"fr-btn case" + (frCase ? " on" : "")} title="区分大小写" onClick={() => setFrCase(v => !v)}>Aa</button>
+                      <button className="fr-btn" onClick={() => frSelect(0)}>{frMatches.length}</button>
+                      <button className="fr-btn" onClick={() => frReplaceOne()} disabled={frMatches.length === 0}>替换</button>
+                      <button className="fr-btn" onClick={frReplaceAll} disabled={frMatches.length === 0}>全部</button>
+                      <button className="fr-btn" onClick={() => setFrOpen(false)}>×</button>
+                    </div>
+                  )}
+                  <div className="editor-stack">
+                    <pre className="code-edit-hl" ref={editHlRef} aria-hidden="true" style={{ fontSize: `${codeFontSize}px` }}>
+                      {editContent.length <= 300000
+                        ? editLines.map((l, i) => (
+                            <div key={i} className="hl-line">
+                              {l.tokens.map((tk, j) => tk.cls ? <span key={j} className={tk.cls}>{tk.text}</span> : <span key={j}>{tk.text}</span>)}
+                              {"\n"}
+                            </div>
+                          ))
+                        : editContent}
+                    </pre>
+                    <textarea
+                      className="code-edit"
+                      value={editContent}
+                      onChange={e => setEditContent(e.target.value)}
+                      onScroll={e => {
+                        const hl = editHlRef.current;
+                        if (hl) { hl.scrollTop = e.currentTarget.scrollTop; hl.scrollLeft = e.currentTarget.scrollLeft; }
+                      }}
+                      onKeyDown={e => {
+                        if (e.key === "Tab") {
+                          e.preventDefault();
+                          const ta = e.currentTarget;
+                          const st = ta.selectionStart, en = ta.selectionEnd;
+                          setEditContent(v => v.slice(0, st) + "    " + v.slice(en));
+                          requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = st + 4; });
+                        }
+                      }}
+                      spellCheck={false} wrap="off" autoFocus
+                      style={{ fontSize: `${codeFontSize}px` }}
+                    />
+                  </div>
+                </div>
               ) : (
               <pre ref={codeRef} className="code" onScroll={onCodeScroll} style={{ fontSize: `${codeFontSize}px`, "--code-line-h": `${codeLineH}px` } as React.CSSProperties}>
                 {isLargeFile && visibleRange.start > 0 && <div style={{ height: visibleRange.start * codeLineH }} />}
@@ -1097,16 +1352,16 @@ export default function App() {
               onMouseDown={() => setIsResizing("right")} />
             <aside className="right" style={{ width: rightWidth, minWidth: 160, maxWidth: 500 }}>
             <div className="outline-hdr">
-              <h4>{t("outline")}</h4>
+              <div className="outline-title"><span className="outline-ic">▦</span>{t("outline")}</div>
               <button className="icon-btn" onClick={() => setOutlineVisible(false)} title="收起大纲">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
               </button>
             </div>
-              <input className="outline-filter" value={outlineFilter} placeholder="filter symbols…"
+              <input className="outline-filter" value={outlineFilter} placeholder="搜索符号…"
                 onChange={e => setOutlineFilter(e.target.value)} />
               {syms.length===0 ? <span className="muted">{t("noSyms")}</span> :
                 filteredSymTree.map(n => renderOutlineSym(n, 0))}
-              {syms.length>0 && <button className="find-refs-btn" onClick={() => syms[0] && findRefs(syms[0].name)}>{t("findRefs")} →</button>}
+              {syms.length>0 && <button className="find-refs-btn" onClick={() => syms[0] && findRefs(syms[0].name)}>查看更多 →</button>}
             {refs.length > 0 && (
               <div className="panel">
                 <h4>{t("refsFor")}: {refTarget}</h4>
@@ -1138,6 +1393,39 @@ export default function App() {
           </button>
         )}
       </main>
+
+      {/* Git last commit diff */}
+      {gitOpen && (
+        <div className="qo-overlay" onClick={() => setGitOpen(false)}>
+          <div className="qo-modal git-modal" onClick={e => e.stopPropagation()}>
+            <div className="git-modal-head">
+              <div>
+                <div className="git-title">最近提交</div>
+                <div className="git-subtitle">查看 HEAD 与上一提交的差异</div>
+              </div>
+              <button className="ref-popup-close" onClick={() => setGitOpen(false)}>✕</button>
+            </div>
+            <div className="git-body">
+              <div className="git-list">
+                {gitFiles.length === 0 ? (
+                  <div className="ref-popup-empty">{gitSel ? "无差异" : "加载中…"}</div>
+                ) : gitFiles.map(f => (
+                  <button key={f.path} className={"git-file " + (gitSel === f.path ? "on" : "")} onClick={() => showGitDiff(f.path)}>
+                    <span className={"git-status st-" + (f.status || "M")[0].toUpperCase()}>{(f.status || "M")[0]}</span>
+                    <span className="git-file-path">{f.path}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="git-diff">
+                {gitDiff ? gitDiff.split("\n").map((line, i) => (
+                  <div key={i} className={"diff-line " + (line.startsWith("+") && !line.startsWith("+++") ? "add" : line.startsWith("-") && !line.startsWith("---") ? "del" : line.startsWith("@@") ? "hunk" : "")}>{line || " "}</div>
+                )) : <div className="ref-popup-empty">选择文件查看差异</div>}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
 
       {/* Global search modal */}
       {searchModalOpen && (
@@ -1223,10 +1511,18 @@ export default function App() {
       )}
 
       <footer className="stbar">
-        <span>{status}</span>
-        <span className="muted">Ln {cursor.line}, Col {cursor.col}</span>
-        <span className="muted" style={{ marginLeft: "auto" }}>{Math.round(codeFontSize / 13 * 100)}%</span>
-        <span className="muted">Ctrl+滚轮缩放 · Ctrl+P File · Ctrl+Shift+N Symbol · Ctrl+F Find</span>
+        <div className="status-left">
+          <span className="status-dot" />
+          <span>{status}</span>
+        </div>
+        <div className="status-right">
+          <span>行 {cursor.line}, 列 {cursor.col}</span>
+          <span>空格: 4</span>
+          <span>UTF-8</span>
+          <span>LF</span>
+          <span>{doc?.language?.toUpperCase() || "TEXT"}</span>
+          <span>{Math.round(codeFontSize / 13 * 100)}%</span>
+        </div>
       </footer>
     </div>
   );
