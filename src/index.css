@@ -1437,3 +1437,5 @@ html, body, #root { height: 100vh; overflow: hidden; }
 .dark .settings-overlay { background: rgba(0,0,0,.42); }
 .dark .settings-panel { box-shadow: 0 24px 72px rgba(0,0,0,.48); }
 .dark .switch { background: #4A4A54; }
+
+.git-error { color: var(--err); white-space: pre-wrap; word-break: break-word; padding: 12px; font-size: 12px; }

@@ -1,5 +1,6 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::process::Command;
 use std::path::PathBuf;
 use std::time::Duration;
 use tauri::Emitter;
@@ -237,55 +238,108 @@ pub fn file_rename(workspace_id: String, old_path: String, new_path: String) -> 
     std::fs::rename(from, to).map_err(|e| format!("cannot rename: {e}"))
 }
 
-#[tauri::command]
-pub fn git_changed_files(workspace_id: String) -> Result<Vec<GitFileChange>, String> {
-    use std::process::Command;
-    let root = workspace_root(&workspace_id)?;
-    if !root.join(".git").exists() {
+fn git_command(root: &std::path::Path) -> Command {
+    let mut command = Command::new("git");
+    command.current_dir(root);
+    command
+}
+
+fn git_stderr(out: &std::process::Output) -> String {
+    String::from_utf8_lossy(&out.stderr).trim().to_string()
+}
+
+fn changed_path(status: &str, paths: &[&str]) -> Option<String> {
+    // Rename/copy records contain both old and new paths. The outline and file
+    // APIs work with the path that exists after HEAD, so expose the new one.
+    let path = if (status.starts_with('R') || status.starts_with('C')) && paths.len() > 1 {
+        paths[paths.len() - 1]
+    } else {
+        paths.first()?
+    };
+    if path.is_empty() { None } else { Some(path.to_string()) }
+}
+
+pub fn git_changed_files_in(root: &std::path::Path) -> Result<Vec<GitFileChange>, String> {
+    let head = git_command(root)
+        .args(["rev-parse", "--verify", "HEAD"])
+        .output()
+        .map_err(|e| format!("git 不可用: {e}"))?;
+    if !head.status.success() {
+        let message = git_stderr(&head);
+        if message.contains("bad revision") || message.contains("ambiguous argument") {
+            return Err("当前仓库还没有提交".to_string());
+        }
         return Err("此文件夹不是 Git 仓库".to_string());
     }
-    let out = Command::new("git")
-        .args(["diff-tree", "--no-commit-id", "--name-status", "-r", "HEAD"])
-        .current_dir(&root)
+
+    let out = git_command(root)
+        .args([
+            "-c", "core.quotepath=false", "diff-tree", "--no-commit-id",
+            "--name-status", "-r", "--first-parent", "--relative", "HEAD",
+        ])
         .output()
         .map_err(|e| format!("git 不可用: {e}"))?;
     if !out.status.success() {
-        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+        return Err(git_stderr(&out));
     }
+
     let text = String::from_utf8_lossy(&out.stdout);
     let mut files = Vec::new();
     for line in text.lines() {
-        let mut parts = line.splitn(2, '\t');
-        if let (Some(st), Some(p)) = (parts.next(), parts.next()) {
-            files.push(GitFileChange { path: p.to_string(), status: st.to_string() });
+        let mut fields = line.split('\t');
+        let Some(status) = fields.next() else { continue };
+        let paths: Vec<&str> = fields.collect();
+        if let Some(path) = changed_path(status, &paths) {
+            files.push(GitFileChange { path, status: status.to_string() });
         }
     }
     Ok(files)
 }
 
-#[tauri::command]
-pub fn git_file_diff(workspace_id: String, path: String) -> Result<String, String> {
-    use std::process::Command;
-    let root = workspace_root(&workspace_id)?;
-    let out = Command::new("git")
-        .args(["diff", "HEAD~1", "HEAD", "--"])
-        .arg(&path)
-        .current_dir(&root)
+pub fn git_file_diff_in(root: &std::path::Path, path: &str) -> Result<String, String> {
+    let out = git_command(root)
+        .args([
+            "-c", "core.quotepath=false", "diff", "--no-color",
+            "HEAD~1", "HEAD", "--",
+        ])
+        .arg(path)
         .output()
         .map_err(|e| format!("git 不可用: {e}"))?;
-    if !out.status.success() {
-        let out2 = Command::new("git")
-            .args(["show", "HEAD", "--"])
-            .arg(&path)
-            .current_dir(&root)
-            .output()
-            .map_err(|e| format!("git 不可用: {e}"))?;
-        if !out2.status.success() {
-            return Err(String::from_utf8_lossy(&out2.stderr).trim().to_string());
-        }
-        return Ok(String::from_utf8_lossy(&out2.stdout).to_string());
+    if out.status.success() {
+        return Ok(String::from_utf8_lossy(&out.stdout).to_string());
     }
-    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+
+    // For the repository's root commit there is no HEAD~1. diff-tree --root
+    // produces the same patch format without the commit message.
+    let root_out = git_command(root)
+        .args([
+            "-c", "core.quotepath=false", "diff-tree", "--patch", "--root",
+            "--no-color", "HEAD", "--",
+        ])
+        .arg(path)
+        .output()
+        .map_err(|e| format!("git 不可用: {e}"))?;
+    if !root_out.status.success() {
+        let message = git_stderr(&root_out);
+        if message.contains("bad revision") || message.contains("ambiguous argument") {
+            return Err("当前仓库还没有提交".to_string());
+        }
+        return Err(message);
+    }
+    Ok(String::from_utf8_lossy(&root_out.stdout).to_string())
+}
+
+#[tauri::command]
+pub fn git_changed_files(workspace_id: String) -> Result<Vec<GitFileChange>, String> {
+    let root = workspace_root(&workspace_id)?;
+    git_changed_files_in(&root)
+}
+
+#[tauri::command]
+pub fn git_file_diff(workspace_id: String, path: String) -> Result<String, String> {
+    let root = workspace_root(&workspace_id)?;
+    safe_relative_path(&root, &path)?;
+    git_file_diff_in(&root, &path)
 }
 
 #[tauri::command]
@@ -584,4 +638,81 @@ pub fn fuzzy_symbols(
     scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
     scored.truncate(max);
     Ok(scored.into_iter().map(|(_, _, t)| t).collect())
+}
+
+#[cfg(test)]
+mod git_tests {
+    use super::{changed_path, git_changed_files_in, git_file_diff_in};
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TempRepo(PathBuf);
+
+    impl Drop for TempRepo {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn git(dir: &Path, args: &[&str]) {
+        let out = Command::new("git").args(args).current_dir(dir).output().expect("git available");
+        assert!(out.status.success(), "git {:?} failed: {}", args, String::from_utf8_lossy(&out.stderr));
+    }
+
+    fn make_repo() -> TempRepo {
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("light-reader-git-{}-{}", std::process::id(), unique));
+        fs::create_dir_all(root.join("src/nested")).unwrap();
+        fs::write(root.join("src/a.txt"), "one\n").unwrap();
+        git(&root, &["init"]);
+        git(&root, &["config", "user.email", "test@example.com"]);
+        git(&root, &["config", "user.name", "Light Reader Test"]);
+        git(&root, &["add", "."]);
+        git(&root, &["commit", "-m", "base"]);
+        fs::remove_file(root.join("src/a.txt")).unwrap();
+        fs::write(root.join("src/中文.txt"), "unicode\n").unwrap();
+        fs::write(root.join("src/nested/b.txt"), "nested\n").unwrap();
+        git(&root, &["add", "-A"]);
+        git(&root, &["commit", "-m", "last commit"]);
+        TempRepo(root)
+    }
+
+    #[test]
+    fn last_commit_paths_use_workspace_relative_unicode_names() {
+        let repo = make_repo();
+        let paths: Vec<_> = git_changed_files_in(&repo.0).unwrap().into_iter().map(|f| f.path).collect();
+        assert!(paths.iter().any(|p| p == "src/中文.txt"), "unicode path missing: {:?}", paths);
+        assert!(paths.iter().any(|p| p == "src/nested/b.txt"), "nested path missing: {:?}", paths);
+        assert!(!paths.iter().any(|p| p == "src/a.txt"), "deleted path exposed as current: {:?}", paths);
+    }
+
+    #[test]
+    fn diff_uses_workspace_relative_path_from_subfolder() {
+        let repo = make_repo();
+        let sub = repo.0.join("src");
+        let paths: Vec<_> = git_changed_files_in(&sub).unwrap().into_iter().map(|f| f.path).collect();
+        assert!(paths.iter().any(|p| p == "nested/b.txt"), "subfolder path missing: {:?}", paths);
+        let diff = git_file_diff_in(&sub, "nested/b.txt").unwrap();
+        assert!(diff.contains("+nested"), "content missing: {}", diff);
+        assert!(!diff.contains("last commit"), "commit message leaked: {}", diff);
+    }
+
+    #[test]
+    fn rename_record_uses_new_path() {
+        assert_eq!(changed_path("R100", &["old.txt", "new.txt"]).as_deref(), Some("new.txt"));
+        assert_eq!(changed_path("A", &["new.txt"]).as_deref(), Some("new.txt"));
+        assert_eq!(changed_path("D", &["old.txt"]).as_deref(), Some("old.txt"));
+    }
+
+    #[test]
+    fn non_git_workspace_is_rejected() {
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let dir = std::env::temp_dir().join(format!("light-reader-no-git-{}", unique));
+        fs::create_dir_all(&dir).unwrap();
+        let err = git_changed_files_in(&dir).unwrap_err();
+        assert!(err.contains("不是 Git 仓库"), "unexpected: {}", err);
+        let _ = fs::remove_dir_all(dir);
+    }
 }

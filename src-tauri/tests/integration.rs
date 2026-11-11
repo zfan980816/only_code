@@ -57,3 +57,4 @@ fn test_navigation_target_fields() {
     assert_eq!(target.start_line, 4);
     assert_eq!(target.kind, "function");
 }
+

@@ -197,6 +197,7 @@ export default function App() {
   const [gitFiles, setGitFiles] = useState<Array<{path:string;status:string}>>([]);
   const [gitDiff, setGitDiff] = useState("");
   const [gitSel, setGitSel] = useState("");
+  const [gitError, setGitError] = useState("");
   const [newFileOpen, setNewFileOpen] = useState(false);
   const [newFileName, setNewFileName] = useState("");
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
@@ -620,14 +621,14 @@ export default function App() {
   }, [editing, saveEdit]);
   
   const openGit = useCallback(async () => {
-    setGitOpen(true); setGitFiles([]); setGitDiff(""); setGitSel("");
+    setGitOpen(true); setGitFiles([]); setGitDiff(""); setGitSel(""); setGitError("");
     if (!ws) return;
     try { setGitFiles(await call<Array<{path:string;status:string}>>("git_changed_files", { workspaceId: ws.id })); } catch (e) { setStatus(String(e)); }
   }, [ws]);
   const showGitDiff = useCallback(async (path: string) => {
     if (!ws) return;
     setGitSel(path);
-    try { setGitDiff(await call<string>("git_file_diff", { workspaceId: ws.id, path })); } catch (e) { setGitDiff(String(e)); }
+    try { setGitDiff(await call<string>("git_file_diff", { workspaceId: ws.id, path })); } catch (e) { setGitDiff(String(e)); setGitError(String(e)); }
   }, [ws]);
 
   const dirOf = (p?: string) => (p && p.includes("/")) ? p.slice(0, p.lastIndexOf("/")) : "";
@@ -1560,7 +1561,9 @@ export default function App() {
             </div>
             <div className="git-body">
               <div className="git-list">
-                {gitFiles.length === 0 ? (
+                {gitError ? (
+                  <div className="ref-popup-empty git-error">{gitError}</div>
+                ) : gitFiles.length === 0 ? (
                   <div className="ref-popup-empty">{gitSel ? "无差异" : "加载中…"}</div>
                 ) : gitFiles.map(f => (
                   <button key={f.path} className={"git-file " + (gitSel === f.path ? "on" : "")} onClick={() => showGitDiff(f.path)}>
