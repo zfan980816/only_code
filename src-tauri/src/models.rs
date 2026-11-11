@@ -182,29 +182,3 @@ pub struct GitCommitDetail {
     pub commit: GitCommit,
     pub files: Vec<GitFileChange>,
 }
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GitBlameLine {
-    pub line: usize,
-    pub hash: String,
-    pub short_hash: String,
-    pub author_name: String,
-    pub author_email: String,
-    pub timestamp: i64,
-    pub summary: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CallHierarchyTarget {
-    pub name: String,
-    pub kind: String,
-    pub path: String,
-    pub start: usize,
-    pub end: usize,
-    pub start_line: usize,
-    pub start_column: usize,
-    pub reference_line: usize,
-    pub reference_text: String,
-}

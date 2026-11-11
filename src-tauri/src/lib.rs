@@ -26,8 +26,6 @@ pub fn run() {
             commands::git_commit_file_diff,
             commands::git_working_changes,
             commands::git_working_diff,
-            commands::git_blame,
-            commands::call_hierarchy,
             commands::file_rename,
             commands::file_delete,
             commands::file_create,

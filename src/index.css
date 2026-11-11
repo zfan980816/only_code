@@ -1531,31 +1531,12 @@ html, body, #root { height: 100vh; overflow: hidden; }
 .git-graph::before, .git-graph i { display: none; }
 
 
-/* ── Git working changes, blame and call hierarchy ── */
+/* ── Git working changes ── */
 .git-mode-tabs { display: flex; gap: 3px; padding: 3px; border-radius: 9px; background: var(--surface-2); }
 .git-mode-tabs button { height: 27px; min-width: 66px; border: 0; border-radius: 7px; background: transparent; color: var(--text-secondary); font-size: 12px; cursor: pointer; }
 .git-mode-tabs button.on { background: var(--surface); color: var(--text); font-weight: 650; box-shadow: 0 1px 5px rgba(15,23,42,.12); }
 .git-working-body { display: grid; grid-template-columns: 340px minmax(0, 1fr); flex: 1; min-height: 0; }
 .git-working-body .git-list { overflow: auto; border-right: 1px solid var(--border-light); padding: 6px; }
 .git-working-body .git-diff-view { padding-top: 0; }
-.blame-info {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: 22px;
-  padding-left: 10px;
-  border-left: 1px solid var(--border);
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  white-space: pre;
-  user-select: none;
-}
-.blame-author { color: var(--text-secondary); min-width: 82px; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
-.blame-hash { color: var(--accent); }
-.dark .blame-info { border-color: var(--border); }
-.call-row { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
-.call-line { color: var(--muted); font-size: 10.5px; font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
-.call-text { color: var(--text-secondary); font-size: 11px; font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 
 .diff-truncated { padding: 8px 14px; color: var(--warn); background: rgba(217,119,6,.10); border-top: 1px solid rgba(217,119,6,.22); font-size: 11px; }
