@@ -106,6 +106,144 @@ const L: Record<Lang, Record<string,string>> = {
   en: { workspaces:"Workspaces",open:"Open Folder",files:"Files",search:"Search",noWs:"No workspace",outline:"Outline",refs:"Refs",defs:"Defs",noFile:"No file",noSyms:"No symbols",focus:"Focus",findRefs:"Find Refs",quick:"Quick open file…",refsFor:"Refs",status:"Ready",fileSearch:"Search in file…",close:"Close",goDef:"Go",popupRefs:"Usages",popupDefs:"Definitions",noRefsFound:"No usages" }
 };
 
+// ── Unified diff parsing + GitHub-style rendering ──
+interface DiffLine { type: "add" | "del" | "ctx"; content: string; oldNo: number | null; newNo: number | null; }
+interface DiffHunk { header: string; lines: DiffLine[]; }
+interface ParsedDiff { hunks: DiffHunk[]; additions: number; deletions: number; binary: boolean; }
+
+function parseUnifiedDiff(text: string): ParsedDiff {
+  const lines = text.split("\n");
+  if (lines.length && lines[lines.length - 1] === "") lines.pop();
+  const hunks: DiffHunk[] = [];
+  let additions = 0, deletions = 0, binary = false;
+  let cur: DiffHunk | null = null;
+  let oldNo = 0, newNo = 0;
+  for (const raw of lines) {
+    if (raw.startsWith("Binary files") || raw.startsWith("GIT binary patch")) { binary = true; continue; }
+    if (raw.startsWith("@@")) {
+      const m = /@@ -(\d+)(?:,\d+)? \+(\d+)/.exec(raw);
+      oldNo = m ? parseInt(m[1]) : 1;
+      newNo = m ? parseInt(m[2]) : 1;
+      cur = { header: raw, lines: [] };
+      hunks.push(cur);
+      continue;
+    }
+    if (!cur) continue;
+    if (raw.startsWith("diff --git") || raw.startsWith("index ") || raw.startsWith("--- ") ||
+        raw.startsWith("+++ ") || raw.startsWith("new file") || raw.startsWith("deleted file") ||
+        raw.startsWith("rename ") || raw.startsWith("\\ No newline")) continue;
+    if (raw.startsWith("+")) { additions++; cur.lines.push({ type: "add", content: raw.slice(1), oldNo: null, newNo: newNo++ }); }
+    else if (raw.startsWith("-")) { deletions++; cur.lines.push({ type: "del", content: raw.slice(1), oldNo: oldNo++, newNo: null }); }
+    else { cur.lines.push({ type: "ctx", content: raw.startsWith(" ") ? raw.slice(1) : raw, oldNo: oldNo++, newNo: newNo++ }); }
+  }
+  return { hunks, additions, deletions, binary };
+}
+
+interface WdMark { start: number; end: number; type: "del" | "add"; }
+
+function tokenizeWords(text: string): { t: string; start: number; end: number }[] {
+  const re = /[A-Za-z0-9_$]+|\s+|./g;
+  const out: { t: string; start: number; end: number }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) out.push({ t: m[0], start: m.index, end: m.index + m[0].length });
+  return out;
+}
+
+function lcsUnmatched(a: string[], b: string[]): { aOnly: boolean[]; bOnly: boolean[] } {
+  const n = a.length, m = b.length;
+  const aOnly = Array(n).fill(true), bOnly = Array(m).fill(true);
+  if (n * m > 40000) return { aOnly, bOnly };
+  const dp: Uint16Array[] = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) { aOnly[i] = false; bOnly[j] = false; i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) i++;
+    else j++;
+  }
+  return { aOnly, bOnly };
+}
+
+// Word-level diff between a removed/added line pair -> char-range marks.
+function wordDiffPair(oldText: string, newText: string): { del: WdMark[]; add: WdMark[] } {
+  const A = tokenizeWords(oldText), B = tokenizeWords(newText);
+  if (A.length + B.length > 400) return { del: [], add: [] };
+  const { aOnly, bOnly } = lcsUnmatched(A.map(x => x.t), B.map(x => x.t));
+  const del: WdMark[] = [], add: WdMark[] = [];
+  A.forEach((tok, i) => { if (aOnly[i] && tok.t.trim()) del.push({ start: tok.start, end: tok.end, type: "del" }); });
+  B.forEach((tok, j) => { if (bOnly[j] && tok.t.trim()) add.push({ start: tok.start, end: tok.end, type: "add" }); });
+  return { del, add };
+}
+
+// Pair each removed-line run with the following added-line run and mark both.
+function hunkWordMarks(lines: DiffLine[]): Map<number, WdMark[]> {
+  const out = new Map<number, WdMark[]>();
+  let i = 0;
+  while (i < lines.length) {
+    if (lines[i].type !== "del") { i++; continue; }
+    let j = i;
+    while (j < lines.length && lines[j].type === "del") j++;
+    const delEnd = j;
+    let addStart = j;
+    while (addStart < lines.length && lines[addStart].type === "add") addStart++;
+    const pairs = Math.min(delEnd - i, addStart - j);
+    for (let k = 0; k < pairs; k++) {
+      const d = lines[i + k], a = lines[addStart + k];
+      if (!d.content.trim() || !a.content.trim()) continue;
+      const wd = wordDiffPair(d.content, a.content);
+      if (wd.del.length) out.set(i + k, wd.del);
+      if (wd.add.length) out.set(addStart + k, wd.add);
+    }
+    i = addStart;
+  }
+  return out;
+}
+
+// Render one diff line: syntax tokens from hl(), overlaid with word-diff marks.
+function renderMarkedLine(content: string, lang: string, marks?: WdMark[]): React.ReactNode {
+  const tokens = hl(content, lang);
+  if (!marks || marks.length === 0) {
+    return tokens.map((tk, i) => tk.cls ? <span key={i} className={tk.cls}>{tk.text}</span> : <span key={i}>{tk.text}</span>);
+  }
+  const markOf: string[] = new Array(content.length).fill("");
+  for (const m of marks) {
+    for (let p = m.start; p < Math.min(m.end, content.length); p++) markOf[p] = m.type;
+  }
+  const out: React.ReactNode[] = [];
+  let key = 0;
+  for (const tk of tokens) {
+    let segStart = 0;
+    for (let p = 1; p <= tk.text.length; p++) {
+      const prev = markOf[segStart];
+      if (p === tk.text.length || markOf[p] !== prev) {
+        const seg = tk.text.slice(segStart, p);
+        const cls = (tk.cls ? tk.cls + " " : "") + (prev ? `wd-${prev}` : "");
+        out.push(<span key={key++} className={cls.trim() || undefined}>{seg}</span>);
+        segStart = p;
+      }
+    }
+  }
+  return out;
+}
+
+function langOfPath(path: string): string {
+  const ext = path.split(".").pop()?.toLowerCase() ?? "";
+  const map: Record<string, string> = {
+    ts: "typescript", tsx: "tsx", js: "javascript", jsx: "tsx", mjs: "javascript", cjs: "javascript",
+    py: "python", pyi: "python", java: "java", rs: "rust", go: "go", c: "c", h: "c",
+    cpp: "cpp", cc: "cpp", cxx: "cpp", hpp: "cpp", hh: "cpp", cs: "csharp",
+    json: "json", css: "css", scss: "css", less: "css", html: "html", htm: "html",
+    xml: "xml", svg: "xml", vue: "vue", svelte: "svelte", sql: "sql", rb: "ruby",
+    php: "php", kt: "kotlin", kts: "kotlin", swift: "swift", yml: "yaml", yaml: "yaml",
+    toml: "toml", sh: "shell", bash: "shell", zsh: "shell", lua: "lua", md: "markdown",
+  };
+  return map[ext] ?? "text";
+}
+
 const KW: Record<string, string[]> = {
   rust: ["fn","let","mut","const","pub","struct","enum","impl","trait","use","mod","match","if","else","for","while","loop","return","self","Self","crate","super","where","async","await","move","ref","dyn","unsafe","as","in","break","continue","true","false","static","type","box","union"],
   go: ["func","var","const","type","struct","interface","map","chan","go","defer","if","else","for","range","return","package","import","switch","case","default","break","continue","fallthrough","select","goto","nil","true","false","iota","make","new","append","len","cap","panic","recover"],
@@ -336,7 +474,89 @@ function dedupeWorkspaces(list: Array<{root:string;name:string}>): Array<{root:s
   });
 }
 
-export default function App() {
+function DiffView({ diffText, path, onOpenFile }: { diffText: string; path: string; onOpenFile?: (line: number) => void }) {
+  const parsed = useMemo(() => parseUnifiedDiff(diffText), [diffText]);
+  const marksByHunk = useMemo(
+    () => parsed.hunks.map(h => hunkWordMarks(h.lines)),
+    [parsed]
+  );
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [hunkIdx, setHunkIdx] = useState(0);
+  const hunkCount = parsed.hunks.length;
+
+  useEffect(() => { setHunkIdx(0); }, [diffText]);
+
+  const jumpHunk = useCallback((dir: number) => {
+    if (hunkCount === 0) return;
+    setHunkIdx(prev => {
+      const next = (prev + dir + hunkCount) % hunkCount;
+      containerRef.current?.querySelector<HTMLElement>(`[data-hunk="${next}"]`)
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return next;
+    });
+  }, [hunkCount]);
+
+  // Alt+Up / Alt+Down: walk hunks while the diff is on screen (IDEA style)
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!e.altKey) return;
+      if (e.key === "ArrowDown") { e.preventDefault(); jumpHunk(1); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); jumpHunk(-1); }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [jumpHunk]);
+
+  if (parsed.binary) {
+    return <div className="ref-popup-empty">二进制文件，无法显示差异</div>;
+  }
+
+  const firstNewLine = parsed.hunks[0]?.lines.find(l => l.newNo !== null)?.newNo ?? 1;
+
+  return (
+    <div className="dv">
+      <div className="dv-file-bar">
+        <span className="dv-file-path" title={path}>{path}</span>
+        <span className="dv-stats">
+          <b className="dv-add">+{parsed.additions}</b>
+          <b className="dv-del">-{parsed.deletions}</b>
+        </span>
+        {hunkCount > 1 && (
+          <span className="dv-hunk-nav">
+            <button title="上一处修改 (Alt+↑)" onClick={() => jumpHunk(-1)}>▲</button>
+            <span>{hunkIdx + 1}/{hunkCount}</span>
+            <button title="下一处修改 (Alt+↓)" onClick={() => jumpHunk(1)}>▼</button>
+          </span>
+        )}
+        {onOpenFile && (
+          <button className="dv-open" title="在阅读视图中打开" onClick={() => onOpenFile(firstNewLine)}>打开文件</button>
+        )}
+      </div>
+      <div className="dv-body" ref={containerRef}>
+        {parsed.hunks.length === 0 && <div className="ref-popup-empty">无差异</div>}
+        {parsed.hunks.map((hunk, hi) => (
+          <div key={hi} data-hunk={hi}>
+            <button className="dv-hunk" title="跳转到此处" onClick={() => { setHunkIdx(hi); onOpenFile?.(hunk.lines.find(l => l.newNo !== null)?.newNo ?? 1); }}>
+              {hunk.header}
+            </button>
+            {hunk.lines.map((line, li) => (
+              <div key={li} className={`dv-line dv-${line.type}`}>
+                <span className="dv-no">{line.oldNo ?? ""}</span>
+                <span className="dv-no">{line.newNo ?? ""}</span>
+                <span className="dv-sign">{line.type === "add" ? "+" : line.type === "del" ? "-" : " "}</span>
+                <span className="dv-code">
+                  {renderMarkedLine(line.content, langOfPath(path), marksByHunk[hi].get(li))}
+                </span>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function App() {
   const [lang, setLang] = useState<Lang>("zh");
   const t = (k: string) => (L[lang] as Record<string,string>)[k] ?? k;
   const [ws, setWs] = useState<Ws | null>(null);
@@ -712,10 +932,6 @@ export default function App() {
   const activeTabData = tabs[activeTab];
   activeTabRef.current = activeTabData?.path;
   const gitGraph = useMemo(() => computeGitGraph(gitCommits), [gitCommits]);
-  const gitDiffLines = useMemo(() => gitDiff ? gitDiff.split("\n").slice(0, 2500) : [], [gitDiff]);
-  const gitDiffTruncated = useMemo(() => gitDiff ? gitDiff.split("\n").length > 2500 : false, [gitDiff]);
-  const workingDiffLines = useMemo(() => workingDiff ? workingDiff.split("\n").slice(0, 2500) : [], [workingDiff]);
-  const workingDiffTruncated = useMemo(() => workingDiff ? workingDiff.split("\n").length > 2500 : false, [workingDiff]);
   const gitAuthors = useMemo(() => [...new Set(gitCommits.map(c => c.authorName).filter(Boolean))].sort((a,b)=>a.localeCompare(b)), [gitCommits]);
   const openFile = useCallback(async (path: string, targetLine?: number, options?: { fromHistory?: boolean }) => {
     if (!ws) return;
@@ -974,6 +1190,10 @@ export default function App() {
     } catch (e) { setGitError(String(e)); setWorkingFiles([]); }
     finally { setWorkingLoading(false); }
   }, [ws]);
+
+  const openReview = useCallback(() => {
+    setGitOpen(true); setGitError(""); setGitTab("working"); loadWorkingChanges();
+  }, [loadWorkingChanges]);
 
   const showWorkingDiff = useCallback(async (path: string) => {
     if (!ws) return;
@@ -1690,7 +1910,11 @@ export default function App() {
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
                 <span>打开文件夹</span>
               </button>
-              <button className="icon-btn" onClick={openGit} title="Git 最近提交对比">
+              <button className="icon-btn review-btn" onClick={openReview} title="Review 未提交修改">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+                {workingFiles.length > 0 && <span className="review-badge">{workingFiles.length}</span>}
+              </button>
+              <button className="icon-btn" onClick={openGit} title="Git 提交历史">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="6" y1="9" x2="6" y2="15"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
               </button>
             </div>
@@ -2150,12 +2374,9 @@ export default function App() {
                   </div>
                 ) : <div className="ref-popup-empty">{gitDetailLoading ? "加载提交详情…" : "选择一个提交"}</div>}
                 <div className="git-diff-view">
-                  {gitFile ? <div className="git-diff-file">{gitFile}</div> : null}
-                  {gitDiffLines.map((line, i) => (
-                    <div key={i} className={"diff-line " + (line.startsWith("+") && !line.startsWith("+++") ? "add" : line.startsWith("-") && !line.startsWith("---") ? "del" : line.startsWith("@@") ? "hunk" : "")}>{line || " "}</div>
-                  ))}
-                {gitDiffTruncated && <div className="diff-truncated">差异过长，仅显示前 2500 行</div>}
-                {!gitDiff && <div className="ref-popup-empty">{gitDetailLoading ? "加载差异…" : "选择变更文件"}</div>}
+                  {gitDiff
+                    ? <DiffView diffText={gitDiff} path={gitFile} onOpenFile={line => gitFile && openFile(gitFile, line)} />
+                    : <div className="ref-popup-empty">{gitDetailLoading ? "加载差异…" : "选择变更文件"}</div>}
                 </div>
               </div>
 
@@ -2187,12 +2408,9 @@ export default function App() {
                 ))}
               </div>
               <div className="git-diff git-diff-view">
-                {workingSel ? <div className="git-diff-file">{workingSel}</div> : null}
-                {workingDiffLines.map((line, i) => (
-                  <div key={i} className={"diff-line " + (line.startsWith("+") && !line.startsWith("+++") ? "add" : line.startsWith("-") && !line.startsWith("---") ? "del" : line.startsWith("@@") ? "hunk" : "")}>{line || " "}</div>
-                ))}
-                {workingDiffTruncated && <div className="diff-truncated">差异过长，仅显示前 2500 行</div>}
-                {!workingDiff && <div className="ref-popup-empty">选择文件查看未提交差异</div>}
+                {workingDiff
+                  ? <DiffView diffText={workingDiff} path={workingSel} onOpenFile={line => openFile(workingSel, line)} />
+                  : <div className="ref-popup-empty">选择文件查看未提交差异</div>}
               </div>
             </div>
             )}
@@ -2306,54 +2524,4 @@ export default function App() {
   );
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+export default App;

@@ -1565,3 +1565,97 @@ html, body, #root { height: 100vh; overflow: hidden; }
 }
 .lsp-cmd-row input:focus { outline: none; border-color: var(--accent); }
 .dark .lsp-cmd-row input { background: rgba(255,255,255,.05); }
+
+/* ── DiffView: GitHub-style review diff ── */
+.dv { display: flex; flex-direction: column; min-height: 100%; }
+.dv-file-bar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 2;
+}
+.dv-file-path {
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 12px; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  flex: 1; min-width: 0;
+}
+.dv-stats { display: flex; gap: 6px; flex-shrink: 0; }
+.dv-stats b { font-size: 11.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.dv-stats .dv-add { color: var(--success); }
+.dv-stats .dv-del { color: var(--err); }
+.dv-hunk-nav {
+  display: flex; align-items: center; gap: 4px; flex-shrink: 0;
+  font-size: 11px; color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.dv-hunk-nav button {
+  border: 1px solid var(--border); border-radius: 5px;
+  background: transparent; color: var(--text-secondary);
+  width: 22px; height: 20px; font-size: 9px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+}
+.dv-hunk-nav button:hover { background: var(--hover); color: var(--text); }
+.dv-open {
+  flex-shrink: 0;
+  border: 1px solid var(--accent); border-radius: 6px;
+  background: transparent; color: var(--accent);
+  font-size: 11.5px; font-weight: 600;
+  padding: 3px 10px; cursor: pointer;
+}
+.dv-open:hover { background: var(--accent); color: #fff; }
+.dark .dv-open:hover { color: #fff; }
+.dv-body { flex: 1; }
+.dv-hunk {
+  display: block; width: 100%; text-align: left;
+  padding: 5px 12px;
+  background: var(--accent-light);
+  color: var(--text-secondary);
+  border: 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 11.5px; cursor: pointer;
+  position: sticky; top: 37px; z-index: 1;
+}
+.dv-hunk:hover { color: var(--accent); }
+.dv-line {
+  display: flex; align-items: stretch;
+  font-family: "Cascadia Code", Consolas, "Microsoft YaHei", monospace;
+  font-size: 12px; line-height: 20px;
+  white-space: pre;
+  min-width: max-content; padding-right: 20px;
+}
+.dv-no {
+  width: 42px; flex-shrink: 0; text-align: right; padding-right: 8px;
+  color: var(--muted); font-size: 10.5px; user-select: none;
+  font-variant-numeric: tabular-nums;
+  border-right: 1px solid var(--border);
+  margin-right: 0;
+}
+.dv-no + .dv-no { margin-left: 8px; }
+.dv-sign { width: 14px; flex-shrink: 0; text-align: center; user-select: none; color: var(--muted); }
+.dv-code { padding-right: 12px; }
+.dv-add { background: rgba(46,160,67,.10); }
+.dv-del { background: rgba(248,81,73,.10); }
+.dv-add .dv-sign { color: var(--success); }
+.dv-del .dv-sign { color: var(--err); }
+.dv-ctx .dv-no { opacity: .55; }
+/* Word-level marks (stronger than line background) */
+.wd-del { background: rgba(248,81,73,.26); border-radius: 2px; }
+.wd-add { background: rgba(46,160,67,.30); border-radius: 2px; }
+.dark .dv-add { background: rgba(46,160,67,.16); }
+.dark .dv-del { background: rgba(248,81,73,.16); }
+.dark .wd-del { background: rgba(248,81,73,.34); }
+.dark .wd-add { background: rgba(46,160,67,.38); }
+
+/* ── Review entry badge on files-panel rail ── */
+.review-btn { position: relative; }
+.review-badge {
+  position: absolute; top: -4px; right: -4px;
+  min-width: 15px; height: 15px; padding: 0 4px;
+  border-radius: 8px;
+  background: var(--accent); color: #fff;
+  font-size: 9.5px; font-weight: 800; line-height: 15px;
+  text-align: center;
+}
