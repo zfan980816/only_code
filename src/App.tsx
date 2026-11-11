@@ -15,10 +15,33 @@ interface NavTarget { path: string; name: string; kind: string; start: number; s
 interface SRes { results: { path: string; name: string; matches: { line: number; text: string }[] }[]; truncated: boolean; filesSearched: number; }
 interface Tab { path: string; name: string; lang: string; }
 
+interface Prefs {
+  lineSpacing: number;
+  codeFont: "default" | "consolas" | "jetbrains";
+}
+
+const DEFAULT_PREFS: Prefs = {
+  lineSpacing: 1.7,
+  codeFont: "default",
+};
+
+const CODE_FONT_STACKS: Record<Prefs["codeFont"], string> = {
+  default: '"Cascadia Code", "JetBrains Mono", "Fira Code", Consolas, "Microsoft YaHei", monospace',
+  consolas: 'Consolas, "Cascadia Mono", "Courier New", monospace',
+  jetbrains: '"JetBrains Mono", "Fira Code", "Source Code Pro", Consolas, monospace',
+};
+
+function readPrefs(): Prefs {
+  try {
+    const raw = JSON.parse(localStorage.getItem("lr-prefs") ?? "{}");
+    return { ...DEFAULT_PREFS, ...raw };
+  } catch { return { ...DEFAULT_PREFS }; }
+}
+
 type Lang = "zh" | "en";
 const L: Record<Lang, Record<string,string>> = {
-  zh: { workspaces:"工作区",open:"打开文件夹",files:"文件",search:"搜索",bookmarks:"书签",noWs:"未打开",outline:"大纲",refs:"引用",defs:"定义",noFile:"未选择文件",noSyms:"无符号",focus:"专注",findRefs:"查找引用",quick:"快速打开文件…",noBm:"无书签",refsFor:"引用",status:"就绪",fileSearch:"文件内搜索…",close:"关闭",goDef:"跳转",popupRefs:"引用处",popupDefs:"定义",noRefsFound:"无引用" },
-  en: { workspaces:"Workspaces",open:"Open Folder",files:"Files",search:"Search",bookmarks:"Bookmarks",noWs:"No workspace",outline:"Outline",refs:"Refs",defs:"Defs",noFile:"No file",noSyms:"No symbols",focus:"Focus",findRefs:"Find Refs",quick:"Quick open file…",noBm:"No bookmarks",refsFor:"Refs",status:"Ready",fileSearch:"Search in file…",close:"Close",goDef:"Go",popupRefs:"Usages",popupDefs:"Definitions",noRefsFound:"No usages" }
+  zh: { workspaces:"工作区",open:"打开文件夹",files:"文件",search:"搜索",noWs:"未打开",outline:"大纲",refs:"引用",defs:"定义",noFile:"未选择文件",noSyms:"无符号",focus:"专注",findRefs:"查找引用",quick:"快速打开文件…",refsFor:"引用",status:"就绪",fileSearch:"文件内搜索…",close:"关闭",goDef:"跳转",popupRefs:"引用处",popupDefs:"定义",noRefsFound:"无引用" },
+  en: { workspaces:"Workspaces",open:"Open Folder",files:"Files",search:"Search",noWs:"No workspace",outline:"Outline",refs:"Refs",defs:"Defs",noFile:"No file",noSyms:"No symbols",focus:"Focus",findRefs:"Find Refs",quick:"Quick open file…",refsFor:"Refs",status:"Ready",fileSearch:"Search in file…",close:"Close",goDef:"Go",popupRefs:"Usages",popupDefs:"Definitions",noRefsFound:"No usages" }
 };
 
 const KW: Record<string, string[]> = {
@@ -33,7 +56,7 @@ const OVERSCAN = 20; // extra lines rendered above/below viewport
 
 function hl(line: string, lang: string): { text: string; cls: string }[] {
   const r: { text: string; cls: string }[] = [];
-  const kws = KW[lang] || [];
+  const kws = KW[lang === "tsx" ? "typescript" : lang] || [];
   const trimmed = line.trimStart();
   
   // Multi-line string tracking (docstrings)
@@ -185,11 +208,15 @@ export default function App() {
   const [frReplace, setFrReplace] = useState("");
   const [frCase, setFrCase] = useState(false);
   const [outlineVisible, setOutlineVisible] = useState(true);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [topSearch, setTopSearch] = useState("");
+  const [topResults, setTopResults] = useState<string[]>([]);
+  const [topSearchOpen, setTopSearchOpen] = useState(false);
+  const [outlineGroupOpen, setOutlineGroupOpen] = useState<Set<string>>(new Set(["imports", "classes", "functions", "constants", "types"]));
   const [searchQ, setSearchQ] = useState("");
   const [results, setResults] = useState<SRes["results"]>([]);
   const [focus, setFocus] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [bookmarks, setBookmarks] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem("lr-bm") ?? "[]"); } catch { return []; } });
   const [wsList, setWsList] = useState<Array<{root:string;name:string}>>(() => { try { return dedupeWorkspaces(JSON.parse(localStorage.getItem("lr-ws-list") ?? "[]")); } catch { return []; } });
   const [refs, setRefs] = useState<NavTarget[]>([]);
   const [defs, setDefs] = useState<NavTarget[]>([]);
@@ -209,7 +236,9 @@ export default function App() {
   const [outlineFilter, setOutlineFilter] = useState("");
   const [scrollTop, setScrollTop] = useState(0);
   const [codeFontSize, setCodeFontSize] = useState<number>(() => { const v = parseInt(localStorage.getItem("lr-font-size") ?? "13"); return v >= 9 && v <= 32 ? v : 13; });
-  const codeLineH = Math.round(codeFontSize * 1.7);
+  const [prefs, setPrefs] = useState<Prefs>(readPrefs);
+  const setPref = useCallback(<K extends keyof Prefs>(key: K, value: Prefs[K]) => setPrefs(prev => ({ ...prev, [key]: value })), []);
+  const codeLineH = Math.round(codeFontSize * prefs.lineSpacing);
   const editLines = useMemo(() => {
     if (!doc) return [];
     return editContent.split("\n").map(line => ({ tokens: hl(line, doc.language) }));
@@ -225,10 +254,6 @@ export default function App() {
   const fileSearchRef = useRef<HTMLInputElement>(null);
   const symRef = useRef<HTMLInputElement>(null);
   const activeTabRef = useRef<string | undefined>(undefined);
-
-  const toggleBm = useCallback((p: string) => {
-    setBookmarks(prev => { const n = prev.includes(p) ? prev.filter(x=>x!==p) : [p,...prev]; localStorage.setItem("lr-bm", JSON.stringify(n)); return n; });
-  }, []);
 
   // Keyboard shortcuts
   // Resizable panels
@@ -261,7 +286,7 @@ export default function App() {
       if (e.ctrlKey && e.key === "f" && !e.shiftKey) { e.preventDefault(); setFileSearchVisible(true); setTimeout(() => fileSearchRef.current?.focus(), 50); }
       if (e.ctrlKey && e.shiftKey && e.key === "N") { e.preventDefault(); setSymOpen(true); setSymQ(""); setSymResults([]); setSymIdx(0); }
       if (e.ctrlKey && e.shiftKey && e.key === "F") { e.preventDefault(); setFocus(v=>!v); }
-      if (e.key === "Escape") { setQuickOpen(false); setFileSearchVisible(false); setFileSearch(""); setMatchIdx(0); setRefPopup(null); setSymOpen(false); setSearchModalOpen(false); setWsMenuOpen(false); setGitOpen(false); }
+      if (e.key === "Escape") { setQuickOpen(false); setFileSearchVisible(false); setFileSearch(""); setMatchIdx(0); setRefPopup(null); setSymOpen(false); setSearchModalOpen(false); setWsMenuOpen(false); setGitOpen(false); setSettingsOpen(false); setTopSearchOpen(false); }
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
@@ -275,6 +300,20 @@ export default function App() {
     }, 100);
     return () => clearTimeout(timer);
   }, [quickQ, quickOpen, ws]);
+
+  // Toolbar quick search (Ctrl+P style)
+  useEffect(() => {
+    if (!topSearchOpen || !ws) return;
+    const timer = setTimeout(async () => {
+      try { setTopResults(await call<string[]>("fuzzy_files", { workspaceId: ws.id, query: topSearch.trim(), limit: 12 })); } catch { setTopResults([]); }
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [topSearch, topSearchOpen, ws]);
+
+  const changeCodeLanguage = useCallback((next: string) => {
+    setDoc(prev => prev ? { ...prev, language: next } : prev);
+    setTabs(prev => prev.map((tb, i) => i === activeTab ? { ...tb, lang: next } : tb));
+  }, [activeTab]);
 
   // Ctrl+wheel zoom on code area
   useEffect(() => {
@@ -397,6 +436,7 @@ export default function App() {
   }, [ws, tabs, activeTab]);
 
   useEffect(() => { localStorage.setItem("lr-font-size", String(codeFontSize)); }, [codeFontSize]);
+  useEffect(() => { localStorage.setItem("lr-prefs", JSON.stringify(prefs)); }, [prefs]);
   
   // Dark mode
   useEffect(() => {
@@ -868,7 +908,6 @@ export default function App() {
       return next;
     });
   }, []);
-  const isBm = activeTabData?.path ? bookmarks.includes(activeTabData.path) : false;
 
   const toggleOutline = useCallback((key: string) => {
     setOutlineOpen(prev => {
@@ -878,6 +917,16 @@ export default function App() {
     });
   }, []);
   
+  const outlineSymbolLabel = (sym: Sym) => {
+    if (sym.kind !== "import") return sym.name;
+    return sym.name
+      .replace(/^import\s+/, "")
+      .replace(/\s+from\s+/, " ← ")
+      .replace(/^from\s+/, "← ")
+      .replace(/^import\s+/, "")
+      .slice(0, 160);
+  };
+
   const renderOutlineSym = (node: SymNode, depth: number): React.ReactNode => {
     const s = node.sym;
     const key = `${s.path}:${s.startLine}:${s.name}`;
@@ -888,10 +937,10 @@ export default function App() {
         <div className="sym-row" style={{ paddingLeft: 8 + depth * 14 }}
           onClick={(e) => { if (hasChildren && (e.target as HTMLElement).classList.contains("outline-arrow")) { e.stopPropagation(); toggleOutline(key); } else { openFile(activeTabData?.path || "", s.startLine + 1); setHighlightWord(s.name); setCurrentLine(s.startLine + 1); } }}
           onContextMenu={(e) => { e.preventDefault(); findRefs(s.name); }}
-          title="Click name: jump · Click arrow: expand/collapse · Right-click: find refs">
-          {hasChildren && <span className={`outline-arrow ${isOpen ? "open" : ""}`}>{isOpen ? "▾" : "▸"}</span>}
-          {!hasChildren && <span className="outline-arrow"> </span>}
-          <span className="kind">{s.kind}</span>{s.name}
+          title={`${s.kind} · Click: jump · Click arrow: expand/collapse · Right-click: find refs`}>
+          <span className={`outline-arrow ${hasChildren ? (isOpen ? "open" : "") : "leaf"}`}>{hasChildren ? (isOpen ? "▾" : "▸") : ""}</span>
+          <span className={`sym-dot dot-${s.kind}`} />{outlineSymbolLabel(s)}
+          <span className="sym-line">{s.startLine + 1}</span>
         </div>
         {hasChildren && isOpen && node.children.map(c => renderOutlineSym(c, depth + 1))}
       </div>
@@ -917,7 +966,6 @@ export default function App() {
         onClick={() => n.isDir ? loadDir(n.path) : openFile(n.path)}>
         <span className="tree-icon">{n.isDir ? (expanded[n.path] ? "▾" : "▸") : "•"}</span>
         {n.name}
-        {!n.isDir && bookmarks.includes(n.path) && <span className="bm-star">★</span>}
       </button>
       {active && (
         <div className="row-ops">
@@ -945,15 +993,21 @@ export default function App() {
     };
     return filterNodes(symTree);
   }, [symTree, outlineFilter]);
+
+  const outlineGroups = useMemo(() => {
+    const pick = (pred: (kind: string) => boolean) => filteredSymTree.filter(n => pred(n.sym.kind));
+    const groups = [
+      { id: "imports", en: "Imports", zh: "导入", icon: "I", nodes: pick(k => k === "import") },
+      { id: "classes", en: "Classes", zh: "类", icon: "C", nodes: pick(k => k === "class" || k === "interface") },
+      { id: "functions", en: "Functions", zh: "函数", icon: "ƒ", nodes: pick(k => k === "function" || k === "method") },
+      { id: "constants", en: "Constants", zh: "常量", icon: "K", nodes: pick(k => k === "constant" || k === "variable") },
+      { id: "types", en: "Types", zh: "类型", icon: "T", nodes: pick(k => k === "type") },
+    ];
+    return groups.filter(g => g.nodes.length > 0);
+  }, [filteredSymTree]);
   
-  // Auto-expand all outline nodes when a new file is loaded
-  useEffect(() => {
-    const all = new Set<string>();
-    const walk = (nodes: SymNode[]) => { for (const n of nodes) { all.add(`${n.sym.path}:${n.sym.startLine}:${n.sym.name}`); walk(n.children); } };
-    walk(symTree);
-    setOutlineOpen(all);
-  }, [symTree]);
-  
+  // Preserve user-expanded symbols when a document reloads after save.
+
   const codeLines = useMemo(() => {
     if (!doc) return [];
     return doc.content.split("\n").map(line => ({ raw: line, tokens: hl(line, doc.language) }));
@@ -1053,14 +1107,66 @@ export default function App() {
               <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7"/><line x1="20" y1="20" x2="16.65" y2="16.65"/></svg>
               <span>搜索</span>
             </button>
-            <button className={"rail-item " + (dark ? "on" : "")} onClick={() => setDark(v => !v)} title={dark ? "亮色模式" : "暗色模式"}>
-              {dark ? (
-                <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
-              ) : (
-                <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-              )}
-              <span>{dark ? "亮色" : "暗色"}</span>
+            <button className={"rail-item " + (settingsOpen ? "on" : "")} onClick={() => setSettingsOpen(v => !v)} title="设置">
+              <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+              <span>设置</span>
             </button>
+            {settingsOpen && (
+              <>
+                <div className="settings-overlay" onClick={() => setSettingsOpen(false)} />
+                <div className="settings-panel">
+                  <div className="settings-header">
+                    <div>
+                      <div className="settings-title">设置</div>
+                      <div className="settings-subtitle">所有选项都会保存在本机</div>
+                    </div>
+                    <button className="icon-btn" onClick={() => setSettingsOpen(false)} title="关闭">✕</button>
+                  </div>
+
+                  <div className="settings-section">
+                    <div className="settings-section-title">通用</div>
+                    <div className="settings-row">
+                      <div className="settings-label"><span>界面语言</span><small>菜单和状态文案</small></div>
+                      <button className="settings-choice" onClick={() => setLang(v => v === "zh" ? "en" : "zh")}>{lang === "zh" ? "中文" : "English"}</button>
+                    </div>
+                    <div className="settings-row">
+                      <div className="settings-label"><span>主题模式</span><small>亮色或暗色界面</small></div>
+                      <div className="settings-segment">
+                        <button className={!dark ? "on" : ""} onClick={() => setDark(false)}>亮色</button>
+                        <button className={dark ? "on" : ""} onClick={() => setDark(true)}>暗色</button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="settings-section">
+                    <div className="settings-section-title">代码阅读</div>
+                    <div className="settings-row">
+                      <div className="settings-label"><span>代码字号</span><small>也可以用 Ctrl + 滚轮调整</small></div>
+                      <div className="settings-slider">
+                        <input type="range" min="9" max="32" step="1" value={codeFontSize} onChange={e => setCodeFontSize(Number(e.target.value))} />
+                        <span>{codeFontSize}px</span>
+                      </div>
+                    </div>
+                    <div className="settings-row">
+                      <div className="settings-label"><span>行间距</span><small>适合长时间阅读</small></div>
+                      <div className="settings-slider">
+                        <input type="range" min="1.4" max="2.2" step="0.1" value={prefs.lineSpacing} onChange={e => setPref("lineSpacing", Number(e.target.value))} />
+                        <span>{prefs.lineSpacing.toFixed(1)}x</span>
+                      </div>
+                    </div>
+                    <div className="settings-row">
+                      <div className="settings-label"><span>代码字体</span><small>仅影响代码区域</small></div>
+                      <select className="settings-select" value={prefs.codeFont} onChange={e => setPref("codeFont", e.target.value as Prefs["codeFont"])}>
+                        <option value="default">默认</option>
+                        <option value="consolas">Consolas</option>
+                        <option value="jetbrains">JetBrains Mono</option>
+                      </select>
+                    </div>
+                  </div>
+
+                </div>
+              </>
+            )}
           </aside>
         )}
         {!focus && (
@@ -1160,12 +1266,43 @@ export default function App() {
                   <button className="icon-btn" title="新建文件" onClick={() => { setNewFileOpen(true); setNewFileName(""); }}>
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M5 12h14"/></svg>
                   </button>
-                  <button className="icon-btn" title="搜索代码" onClick={() => setSearchModalOpen(true)}>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7"/><line x1="20" y1="20" x2="16.65" y2="16.65"/></svg>
-                  </button>
+                  <div className="toolbar-search">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7"/><line x1="20" y1="20" x2="16.65" y2="16.65"/></svg>
+                    <input
+                      value={topSearch}
+                      placeholder="搜索代码..."
+                      spellCheck={false}
+                      onChange={e => { setTopSearch(e.target.value); setTopSearchOpen(true); }}
+                      onFocus={() => setTopSearchOpen(true)}
+                      onKeyDown={e => {
+                        if (e.key === "Escape") setTopSearchOpen(false);
+                        if (e.key === "Enter" && topResults[0]) {
+                          const path = topResults[0];
+                          setTopSearchOpen(false); setTopSearch(""); openFile(path);
+                        }
+                      }}
+                    />
+                    <span className="toolbar-key">Ctrl+P</span>
+                    {topSearchOpen && topResults.length > 0 && (
+                      <div className="toolbar-results">
+                        {topResults.map((path, i) => (
+                          <button key={path + i} onClick={() => { setTopSearchOpen(false); setTopSearch(""); openFile(path); }}>{path}</button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="toolbar-divider" />
                   <button className={"icon-btn " + (dark ? "on" : "")} title={dark ? "切换亮色" : "切换暗色"} onClick={() => setDark(v => !v)}>
                     {dark ? "☀" : "☾"}
                   </button>
+                  <select className="lang-select" value={doc?.language || "text"} title="代码语言" onChange={e => changeCodeLanguage(e.target.value)}>
+                    <option value="text">Text</option>
+                    <option value="typescript">TypeScript</option>
+                    <option value="javascript">JavaScript</option>
+                    <option value="tsx">TSX</option>
+                    <option value="python">Python</option>
+                    <option value="java">Java</option>
+                  </select>
                 </div>
               </div>
               )}
@@ -1175,7 +1312,6 @@ export default function App() {
                   {!editing && <button className="btn-mini" onClick={startEdit}>编辑</button>}
                   {editing && <button className="btn-mini save" onClick={saveEdit}>保存</button>}
                   {editing && <button className="btn-mini" onClick={cancelEdit}>取消</button>}
-                  <button className="btn-mini" onClick={() => { const p = activeTabData?.path; if (p) toggleBm(p); }}>{isBm ? "★" : "☆"}</button>
                   <span className="lang-tag">{doc.language}</span>
                 </div>
               </div>
@@ -1194,7 +1330,7 @@ export default function App() {
                 </div>
               )}
               {editing ? (
-                <div className="editor-wrap">
+                <div className="editor-wrap" style={{ lineHeight: prefs.lineSpacing, fontFamily: CODE_FONT_STACKS[prefs.codeFont] } as React.CSSProperties}>
                   {frOpen && (
                     <div className="fr-bar">
                       <input className="fr-input" value={frFind} placeholder="查找" spellCheck={false}
@@ -1243,7 +1379,7 @@ export default function App() {
                   </div>
                 </div>
               ) : (
-              <pre ref={codeRef} className="code" onScroll={onCodeScroll} style={{ fontSize: `${codeFontSize}px`, "--code-line-h": `${codeLineH}px` } as React.CSSProperties}>
+              <pre ref={codeRef} className="code" onScroll={onCodeScroll} style={{ fontSize: `${codeFontSize}px`, lineHeight: prefs.lineSpacing, fontFamily: CODE_FONT_STACKS[prefs.codeFont], "--code-line-h": `${codeLineH}px` } as React.CSSProperties}>
                 {isLargeFile && visibleRange.start > 0 && <div style={{ height: visibleRange.start * codeLineH }} />}
                 {codeLines.slice(visibleRange.start, visibleRange.end).map((line, idx) => {
                   const i = visibleRange.start + idx;
@@ -1359,9 +1495,26 @@ export default function App() {
             </div>
               <input className="outline-filter" value={outlineFilter} placeholder="搜索符号…"
                 onChange={e => setOutlineFilter(e.target.value)} />
-              {syms.length===0 ? <span className="muted">{t("noSyms")}</span> :
-                filteredSymTree.map(n => renderOutlineSym(n, 0))}
-              {syms.length>0 && <button className="find-refs-btn" onClick={() => syms[0] && findRefs(syms[0].name)}>查看更多 →</button>}
+              {syms.length===0 ? <span className="muted">{t("noSyms")}</span> : outlineGroups.length===0 ? (
+                <div className="muted" style={{ padding: "8px 6px" }}>无匹配符号</div>
+              ) : outlineGroups.map(group => {
+                const open = outlineGroupOpen.has(group.id);
+                return (
+                  <div key={group.id} className="outline-group">
+                    <button className="outline-group-hdr" onClick={() => setOutlineGroupOpen(prev => {
+                      const next = new Set(prev);
+                      if (next.has(group.id)) next.delete(group.id); else next.add(group.id);
+                      return next;
+                    })}>
+                      <span className={`outline-arrow ${open ? "open" : ""}`}>{open ? "▾" : "▸"}</span>
+                      <span className={`outline-group-icon gi-${group.id}`}>{group.icon}</span>
+                      <span className="outline-group-name">{lang === "zh" ? `${group.en} ${group.zh}` : group.en}</span>
+                      <span className="outline-group-count">{group.nodes.length}</span>
+                    </button>
+                    {open && <div className="outline-group-body">{group.nodes.map(n => renderOutlineSym(n, 0))}</div>}
+                  </div>
+                );
+              })}
             {refs.length > 0 && (
               <div className="panel">
                 <h4>{t("refsFor")}: {refTarget}</h4>
