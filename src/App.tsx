@@ -196,6 +196,20 @@ function getWordIndex(text: string, clicked: number): { start: number; end: numb
 
 interface SymNode { sym: Sym; children: SymNode[]; }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Exact identifier-boundary matching: highlights whole words only (IDEA-like occurrence marking).
+function exactIdentifierRegex(word: string): RegExp | null {
+  if (!word) return null;
+  try {
+    return new RegExp(`(?<![A-Za-z0-9_$])${escapeRegExp(word)}(?![A-Za-z0-9_$])`, "g");
+  } catch {
+    return null;
+  }
+}
+
 function normPath(p?: string): string {
   return (p ?? "")
     .replace(/\\/g, "/")
@@ -601,7 +615,7 @@ export default function App() {
     try {
       setErr(null); setStatus(`Loading...`);
       const d = await call<Doc>("file_read", { workspaceId: ws.id, path });
-      setDoc(d); setRefs([]); setDefs([]); setFileSearch(""); setFileSearchVisible(false); setCursor({line:target,col:1}); setCurrentLine(target); _inMultiLine = false; setEditing(false);
+      setDoc(d); setRefs([]); setDefs([]); setFileSearch(""); setFileSearchVisible(false); setCursor({line:target,col:1}); setCurrentLine(target); _inMultiLine = false; setEditing(false); if (!sameFile) setHighlightWord("");
       const name = path.split("/").pop() || path;
       setTabs(prev => {
         if (prev.some(tb => tb.path === path)) return prev;
@@ -1258,6 +1272,41 @@ export default function App() {
     return { start, end };
   }, [isLargeFile, scrollTop, viewportH, codeLines.length, codeLineH]);
 
+  // Exact identifier occurrences of the clicked word in the current file (for count + rendering)
+  const highlightOccurrences = useMemo(() => {
+    const empty = { count: 0, lines: new Set<number>() };
+    if (!doc || !highlightWord) return empty;
+    const re = exactIdentifierRegex(highlightWord);
+    if (!re) return empty;
+    const lines = new Set<number>();
+    let count = 0;
+    for (let i = 0; i < codeLines.length; i++) {
+      const m = codeLines[i].raw.match(re);
+      if (m?.length) { count += m.length; lines.add(i + 1); }
+    }
+    return { count, lines };
+  }, [doc, highlightWord, codeLines]);
+
+  // Shared token renderer: exact-boundary highlight of highlightWord inside any token
+  const renderToken = useCallback((tk: { text: string; cls: string }, j: number) => {
+    const plain = tk.cls ? <span key={j} className={tk.cls}>{tk.text}</span> : <span key={j}>{tk.text}</span>;
+    const re = exactIdentifierRegex(highlightWord);
+    if (!re) return plain;
+    re.lastIndex = 0;
+    const pieces: React.ReactNode[] = [];
+    let last = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(tk.text)) !== null) {
+      if (m.index > last) pieces.push(tk.text.slice(last, m.index));
+      pieces.push(<span className="sym-hl" key={`hl-${m.index}`}>{m[0]}</span>);
+      last = m.index + m[0].length;
+      if (m[0].length === 0) re.lastIndex++;
+    }
+    if (last < tk.text.length) pieces.push(tk.text.slice(last));
+    if (pieces.length === 0) return plain;
+    return <span key={j} className={tk.cls || undefined}>{pieces}</span>;
+  }, [highlightWord]);
+
   const onCodeScroll = useCallback((e: React.UIEvent<HTMLPreElement>) => {
     const el = e.currentTarget;
     setScrollTop(el.scrollTop);
@@ -1635,22 +1684,6 @@ export default function App() {
                     jumpTarget && jumpTarget.path === activeTabData?.path && jumpTarget.line === i + 1 ? "jump-target" : "",
                     currentLine === i + 1 ? "current-line" : "",
                   ].filter(Boolean).join(" ");
-                  const renderToken = (tk: { text: string; cls: string }, j: number) => {
-                    if (highlightWord && tk.text.includes(highlightWord)) {
-                      const parts = tk.text.split(highlightWord);
-                      return (
-                        <span key={j} className={tk.cls || undefined}>
-                          {parts.map((part, pi) => (
-                            <span key={pi}>
-                              {part}
-                              {pi < parts.length - 1 && <span className="sym-hl">{highlightWord}</span>}
-                            </span>
-                          ))}
-                        </span>
-                      );
-                    }
-                    return tk.cls ? <span key={j} className={tk.cls}>{tk.text}</span> : <span key={j}>{tk.text}</span>;
-                  };
                   // IDEA fold: truncate line at the fold-opening bracket, show … placeholder
                   let foldBracketPos = -1;
                   let foldBracketChar = "";
@@ -1682,22 +1715,6 @@ export default function App() {
                       }
                     }
                   }
-                  const renderVisible = (tk: { text: string; cls: string }, j: number) => {
-                    if (highlightWord && tk.text.includes(highlightWord)) {
-                      const parts = tk.text.split(highlightWord);
-                      return (
-                        <span key={j} className={tk.cls || undefined}>
-                          {parts.map((part, pi) => (
-                            <span key={pi}>
-                              {part}
-                              {pi < parts.length - 1 && <span className="sym-hl">{highlightWord}</span>}
-                            </span>
-                          ))}
-                        </span>
-                      );
-                    }
-                    return tk.cls ? <span key={j} className={tk.cls}>{tk.text}</span> : <span key={j}>{tk.text}</span>;
-                  };
                   return (
                     <div key={i} className={lineClasses}
                       onClick={(e) => handleCodeClick(e, i)}>
@@ -1707,7 +1724,7 @@ export default function App() {
                         {isFoldable ? (isFolded ? "▸" : "▾") : ""}
                       </span>
                       <span className="code-text">
-                        {(isFolded && isFoldable && foldBracketPos >= 0 ? visibleTokens : line.tokens).map(isFolded && isFoldable ? renderVisible : renderToken)}
+                        {(isFolded && isFoldable && foldBracketPos >= 0 ? visibleTokens : line.tokens).map(renderToken)}
                         {isFolded && isFoldable && foldBracketPos >= 0 && (
                           <span className="fold-placeholder"
                             onClick={(e) => { e.stopPropagation(); toggleFold(i); }}
@@ -2030,6 +2047,11 @@ export default function App() {
           <span>LF</span>
           <span>{doc?.language?.toUpperCase() || "TEXT"}</span>
           <span>{Math.round(codeFontSize / 13 * 100)}%</span>
+          {highlightWord && highlightOccurrences.count > 0 && (
+            <span title={lang === "zh" ? "当前文件匹配数" : "Occurrences in current file"}>
+              {highlightWord} · {highlightOccurrences.count}
+            </span>
+          )}
         </div>
       </footer>
     </div>

@@ -576,9 +576,14 @@ html, body, #root { height: 100vh; overflow: hidden; }
 
 /* ── Symbol highlight (all occurrences of clicked word) ── */
 .sym-hl {
-  background: rgba(255,193,7,.25);
+  background: rgba(53,116,240,.16);
   border-radius: 2px;
-  box-shadow: 0 1px 0 rgba(255,193,7,.4);
+  box-shadow: 0 0 0 1px rgba(53,116,240,.20);
+  color: inherit;
+}
+.dark .sym-hl {
+  background: rgba(96,165,250,.22);
+  box-shadow: 0 0 0 1px rgba(96,165,250,.28);
 }
 
 
