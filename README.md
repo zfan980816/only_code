@@ -6,6 +6,7 @@
 
 - 本地工作区管理：打开文件夹、拖拽导入、常用目录、会话恢复
 - 懒加载文件树，支持 `.gitignore`，隐藏/超大/二进制文件安全跳过
+- 多编码自动识别：UTF-8 / UTF-16 BOM / GBK·GB2312·GB18030（中文存量项目注释不再乱码）
 - 语法高亮：JavaScript / TypeScript / TSX / Python / Java 完整解析，Rust / Go / C / C++ / C# / PHP / Ruby / Kotlin / Swift / Lua / SQL / Shell / JSON / YAML / TOML / CSS / HTML / XML / Vue / Svelte / Markdown 关键词高亮
 - 全文/正则搜索，流式返回结果
 - IDE 风格分组大纲（Imports / Classes / Functions / Constants / Types）、符号搜索、跳转到定义、引用查找
@@ -256,6 +257,10 @@ Windows 下缺少 Visual Studio Build Tools。安装 [VS Build Tools](https://vi
 ### Q: 大文件显示"truncated"
 
 超过 2MB 的文件会截断显示，只展示前 2MB 内容以保护性能。
+
+### Q: 打开老项目中文注释显示乱码？
+
+Light Reader 会自动识别 UTF-8 / UTF-16 / GBK 系编码（按 BOM 与内容探测）。无法识别时以 UTF-8 有损方式展示。编辑保存统一写为 UTF-8。
 
 ## 路线图
 
