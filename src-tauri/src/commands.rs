@@ -12,12 +12,12 @@ use crate::fs_util::{
 use crate::indexer::index_workspace;
 use crate::models::{
     FileDocument, GitBranch, GitCommit, GitCommitDetail, GitFileChange, GitLogOptions,
-    HighlightSpan, IndexProgress, NavigationTarget, SearchOptions, SearchResponse, SearchResult,
+    IndexProgress, NavigationTarget, SearchOptions, SearchResponse, SearchResult,
     Symbol, TreeNode, Workspace,
 };
 use crate::search::search_workspace;
 use crate::state::{emit_progress, insert_workspace, set_symbols, workspace_root, workspace_symbols};
-use crate::symbols::{extract_symbols, highlight_source, read_text_file, symbol_at};
+use crate::symbols::{extract_symbols, read_text_file, symbol_at};
 
 #[tauri::command]
 pub fn workspace_open(root: String, app: tauri::AppHandle) -> Result<Workspace, String> {
@@ -203,7 +203,7 @@ pub fn file_read(workspace_id: String, path: String) -> Result<FileDocument, Str
     };
     let content = decode_lossy(&bytes[..take_len]);
     let language = language_for_path(&target).to_string();
-    let highlights = highlight_source(&content, &language);
+    let highlights = Vec::new();
 
     Ok(FileDocument {
         path: path.clone(),
@@ -638,18 +638,6 @@ pub fn file_write(workspace_id: String, path: String, content: String) -> Result
     }
     std::fs::write(&target, content.as_bytes()).map_err(|e| format!("cannot write file: {e}"))?;
     Ok(())
-}
-
-#[tauri::command]
-pub fn highlight(workspace_id: String, path: String) -> Result<Vec<HighlightSpan>, String> {
-    let root = workspace_root(&workspace_id)?;
-    let target = safe_relative_path(&root, &path)?;
-    let (content, _truncated) =
-        read_text_file(&target).ok_or_else(|| "file is missing, binary, or too large".to_string())?;
-    Ok(highlight_source(
-        &content,
-        language_for_path(&target),
-    ))
 }
 
 #[tauri::command]

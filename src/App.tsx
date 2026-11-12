@@ -102,8 +102,8 @@ function readPrefs(): Prefs {
 
 type Lang = "zh" | "en";
 const L: Record<Lang, Record<string,string>> = {
-  zh: { workspaces:"工作区",open:"打开文件夹",files:"文件",search:"搜索",noWs:"未打开",outline:"大纲",refs:"引用",defs:"定义",noFile:"未选择文件",noSyms:"无符号",focus:"专注",findRefs:"查找引用",quick:"快速打开文件…",refsFor:"引用",status:"就绪",fileSearch:"文件内搜索…",close:"关闭",goDef:"跳转",popupRefs:"引用处",popupDefs:"定义",noRefsFound:"无引用" },
-  en: { workspaces:"Workspaces",open:"Open Folder",files:"Files",search:"Search",noWs:"No workspace",outline:"Outline",refs:"Refs",defs:"Defs",noFile:"No file",noSyms:"No symbols",focus:"Focus",findRefs:"Find Refs",quick:"Quick open file…",refsFor:"Refs",status:"Ready",fileSearch:"Search in file…",close:"Close",goDef:"Go",popupRefs:"Usages",popupDefs:"Definitions",noRefsFound:"No usages" }
+  zh: { workspaces:"工作区",open:"打开文件夹",files:"文件",search:"搜索",noWs:"未打开",outline:"大纲",refs:"引用",defs:"定义",noSyms:"无符号",focus:"专注",findRefs:"查找引用",quick:"快速打开文件…",refsFor:"引用",status:"就绪",fileSearch:"文件内搜索…",close:"关闭",goDef:"跳转",popupRefs:"引用处",popupDefs:"定义",noRefsFound:"无引用" },
+  en: { workspaces:"Workspaces",open:"Open Folder",files:"Files",search:"Search",noWs:"No workspace",outline:"Outline",refs:"Refs",defs:"Defs",noSyms:"No symbols",focus:"Focus",findRefs:"Find Refs",quick:"Quick open file…",refsFor:"Refs",status:"Ready",fileSearch:"Search in file…",close:"Close",goDef:"Go",popupRefs:"Usages",popupDefs:"Definitions",noRefsFound:"No usages" }
 };
 
 // ── Unified diff parsing + GitHub-style rendering ──
@@ -1468,7 +1468,6 @@ function App() {
           }
         }
       } catch (err) {
-        console.error("[goDef]", err);
         setStatus(lang === "zh" ? `跳转失败：${err}` : `Go-to-definition failed: ${err}`);
       }
       return;

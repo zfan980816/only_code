@@ -337,11 +337,6 @@ html, body, #root { height: 100vh; overflow: hidden; }
 .hl-cmt { color: var(--code-cmt); font-style: normal; font-weight: 400; }
 .hl-type { color: var(--code-type); font-weight: 500; }
 
-.no-file {
-  flex: 1; display: flex; align-items: center; justify-content: center;
-  color: var(--muted); font-size: 14px;
-}
-
 /* ── Right sidebar ── */
 .right {
   width: 230px; min-width: 180px;
@@ -737,51 +732,6 @@ html, body, #root { height: 100vh; overflow: hidden; }
 .ws-switcher:hover { background: var(--hover); }
 .ws-switcher span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-switcher svg { color: var(--muted); flex-shrink: 0; }
-.ws-menu-overlay { position: fixed; inset: 0; z-index: 60; }
-.ws-menu {
-  position: absolute;
-  top: 52px; left: 10px; right: 10px;
-  background: var(--surface);
-  border: 1px solid var(--border-light);
-  border-radius: 11px;
-  box-shadow: 0 12px 32px rgba(0,0,0,.14), 0 4px 8px rgba(0,0,0,.05);
-  padding: 5px;
-  z-index: 61;
-  animation: wsMenuIn .13s cubic-bezier(.4,0,.2,1);
-}
-@keyframes wsMenuIn {
-  from { opacity: 0; transform: translateY(-5px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-.ws-menu-row { display: flex; align-items: center; border-radius: 7px; }
-.ws-menu-row.on { background: var(--accent-light); }
-.ws-menu-item {
-  flex: 1; display: block; text-align: left;
-  padding: 8px 10px;
-  border: 0; background: transparent;
-  border-radius: 7px;
-  font-size: 13px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  min-width: 0;
-}
-.ws-menu-item:hover { background: var(--hover); color: var(--text); }
-.ws-menu-row.on .ws-menu-item { color: var(--accent); font-weight: 600; }
-.ws-menu-remove {
-  border: 0; background: transparent;
-  color: var(--muted);
-  padding: 4px 9px;
-  font-size: 12px;
-  cursor: pointer;
-  border-radius: 6px;
-  opacity: 0;
-  transition: all 0.1s ease;
-  flex-shrink: 0;
-}
-.ws-menu-row:hover .ws-menu-remove { opacity: 1; }
-.ws-menu-remove:hover { color: var(--err); background: #FEF2F2; }
-.ws-menu-divider { height: 1px; background: var(--border-light); margin: 5px 4px; }
 
 
 /* ── LR logo (sidebar brand) ── */
@@ -1044,8 +994,6 @@ html, body, #root { height: 100vh; overflow: hidden; }
 .dark .tabs button.on { box-shadow: 0 1px 4px rgba(0,0,0,.22), 0 0 0 1px rgba(255,255,255,.04); }
 .dark .btn-open { background: #F4F4F5; color: #17171A; }
 .dark .btn-open:hover { background: #fff; }
-.dark .ws-menu { box-shadow: 0 14px 36px rgba(0,0,0,.34); }
-.dark .ws-menu-remove:hover { background: rgba(220,38,38,.16); }
 .dark .qo-overlay { background: rgba(0,0,0,.42); }
 .dark .qo-modal { box-shadow: 0 18px 48px rgba(0,0,0,.42); }
 .dark .code-line:hover { background: rgba(255,255,255,.035); }

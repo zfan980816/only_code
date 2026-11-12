@@ -114,45 +114,6 @@ impl SourceLanguage {
         Some(language)
     }
 
-    pub fn highlight_configuration(
-        &self,
-    ) -> Option<tree_sitter_highlight::HighlightConfiguration> {
-        let language = self.tree_language()?;
-        let query = match self {
-            Self::JavaScript => tree_sitter_javascript::HIGHLIGHT_QUERY.to_string(),
-            Self::TypeScript | Self::Tsx => format!(
-                "{}\n{}",
-                tree_sitter_javascript::HIGHLIGHT_QUERY,
-                tree_sitter_typescript::HIGHLIGHTS_QUERY
-            ),
-            Self::Python => tree_sitter_python::HIGHLIGHTS_QUERY.to_string(),
-            Self::Java => tree_sitter_java::HIGHLIGHTS_QUERY.to_string(),
-            _ => return None,
-        };
-        let mut config = tree_sitter_highlight::HighlightConfiguration::new(
-            language,
-            "light-reader",
-            &query,
-            "",
-            "",
-        )
-        .ok()?;
-        config.configure(&HIGHLIGHT_NAMES);
-        Some(config)
-    }
 }
 
-pub const HIGHLIGHT_NAMES: &[&str] = &[
-    "attribute",
-    "comment",
-    "constant",
-    "function",
-    "keyword",
-    "operator",
-    "property",
-    "punctuation",
-    "string",
-    "type",
-    "variable",
-];
 

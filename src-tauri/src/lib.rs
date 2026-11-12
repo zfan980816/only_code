@@ -30,7 +30,6 @@ pub fn run() {
             commands::file_rename,
             commands::file_delete,
             commands::file_create,
-            commands::highlight,
             commands::outline,
             commands::search,
             commands::resolve_definition,

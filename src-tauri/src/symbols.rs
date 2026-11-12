@@ -1,63 +1,7 @@
 use crate::fs_util::{decode_lossy, is_probably_binary, line_col_at};
-use crate::language::{HIGHLIGHT_NAMES, SourceLanguage};
-use crate::models::{HighlightSpan, Symbol};
-use once_cell::sync::Lazy;
-use std::{fs, path::Path, sync::Mutex};
-
-use tree_sitter_highlight::{HighlightEvent, Highlighter};
-
-static HIGHLIGHTER: Lazy<Mutex<Highlighter>> = Lazy::new(|| Mutex::new(Highlighter::new()));
-
-pub fn highlight_source(source: &str, language: &str) -> Vec<HighlightSpan> {
-    let lang = match language {
-        "javascript" => SourceLanguage::JavaScript,
-        "typescript" => SourceLanguage::TypeScript,
-        "tsx" => SourceLanguage::Tsx,
-        "python" => SourceLanguage::Python,
-        "java" => SourceLanguage::Java,
-        _ => return Vec::new(),
-    };
-    let Some(config) = lang.highlight_configuration() else {
-        return Vec::new();
-    };
-    let mut highlighter = match HIGHLIGHTER.lock() {
-        Ok(lock) => lock,
-        Err(_) => return Vec::new(),
-    };
-    let events = match highlighter.highlight(&config, source.as_bytes(), None, |_| None) {
-        Ok(events) => events,
-        Err(_) => return Vec::new(),
-    };
-
-    let mut spans = Vec::new();
-    let mut stack: Vec<&'static str> = Vec::new();
-    for event in events {
-        let Ok(event) = event else { break };
-        match event {
-            HighlightEvent::HighlightStart(index) => {
-                if let Some(name) = HIGHLIGHT_NAMES.get(index.0) {
-                    stack.push(name);
-                }
-            }
-            HighlightEvent::HighlightEnd => {
-                stack.pop();
-            }
-            HighlightEvent::Source { start, end } => {
-                if let Some(kind) = stack.last() {
-                    if end > start && matches!(*kind, "comment" | "constant" | "function" | "keyword" | "operator" | "property" | "punctuation" | "string" | "type" | "variable" | "attribute") {
-                        spans.push(HighlightSpan {
-                            start,
-                            end,
-                            kind: (*kind).to_string(),
-                        });
-                    }
-                }
-            }
-        }
-    }
-    spans
-}
-
+use crate::language::SourceLanguage;
+use crate::models::Symbol;
+use std::{fs, path::Path};
 pub fn extract_symbols(path: &Path, relative_path: &str, source: &str) -> Vec<Symbol> {
     let language = SourceLanguage::from_path(path);
     let Some(tree_language) = language.tree_language() else {
