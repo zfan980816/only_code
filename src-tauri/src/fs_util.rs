@@ -70,11 +70,28 @@ pub fn is_probably_binary(bytes: &[u8]) -> bool {
 }
 
 pub fn decode_lossy(bytes: &[u8]) -> String {
+    // BOM-first: explicit marks always win.
     if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
-        String::from_utf8_lossy(&bytes[3..]).into_owned()
-    } else {
-        String::from_utf8_lossy(bytes).into_owned()
+        return String::from_utf8_lossy(&bytes[3..]).into_owned();
     }
+    if bytes.starts_with(&[0xFF, 0xFE]) {
+        return encoding_rs::UTF_16LE.decode(&bytes[2..]).0.into_owned();
+    }
+    if bytes.starts_with(&[0xFE, 0xFF]) {
+        return encoding_rs::UTF_16BE.decode(&bytes[2..]).0.into_owned();
+    }
+    // Strict UTF-8: the overwhelmingly common case, keep byte-exact fidelity.
+    if let Ok(text) = std::str::from_utf8(bytes) {
+        return text.to_string();
+    }
+    // Not UTF-8: legacy Chinese projects are usually GBK/GB2312, both subsets
+    // of GB18030. Decode with it before giving up to replacement chars.
+    let (text, _enc, had_errors) = encoding_rs::GB18030.decode(bytes);
+    if !had_errors {
+        return text.into_owned();
+    }
+    // Unknown encoding: last resort, lossy UTF-8.
+    String::from_utf8_lossy(bytes).into_owned()
 }
 
 pub fn line_col_at(source: &str, byte_offset: usize) -> (usize, usize) {
@@ -116,6 +133,27 @@ mod tests {
     fn strips_utf8_bom() {
         let text = decode_lossy(&[0xEF, 0xBB, 0xBF, b'a', b'b']);
         assert_eq!(text, "ab");
+    }
+
+    #[test]
+    fn decodes_gbk_chinese_comments() {
+        let utf8 = "// 这是一个中文注释";
+        let (gbk, _, had_errors) = encoding_rs::GBK.encode(utf8);
+        assert!(!had_errors);
+        assert_eq!(decode_lossy(&gbk), utf8);
+    }
+
+    #[test]
+    fn decodes_utf16le_with_bom() {
+        let (bytes, _, had_errors) = encoding_rs::UTF_16LE.encode("\u{feff}// hi");
+        assert!(!had_errors);
+        assert_eq!(decode_lossy(&bytes), "// hi");
+    }
+
+    #[test]
+    fn keeps_utf8_byte_exact() {
+        let text = "const x = 1; // café ünïcode";
+        assert_eq!(decode_lossy(text.as_bytes()), text);
     }
 
     #[test]

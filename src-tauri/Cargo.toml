@@ -23,6 +23,7 @@ regex = "1"
 rusqlite = { version = "0.41", features = ["bundled"] }
 notify = "8"
 ignore = "0.4"
+encoding_rs = "0.8"
 walkdir = "2"
 tree-sitter = "0.24.7"
 tree-sitter-language = "0.1"
