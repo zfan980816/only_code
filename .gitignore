@@ -35,3 +35,4 @@ src-tauri/gen/schemas
 
 # local e2e captures
 e2e-*.png
+e2e2-*.png

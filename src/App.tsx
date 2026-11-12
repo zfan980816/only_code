@@ -205,6 +205,7 @@ function hunkWordMarks(lines: DiffLine[]): Map<number, WdMark[]> {
 
 // Render one diff line: syntax tokens from hl(), overlaid with word-diff marks.
 function renderMarkedLine(content: string, lang: string, marks?: WdMark[]): React.ReactNode {
+  if (typeof window !== "undefined" && (window as any).__wdLog) (window as any).__wdLog.push(content.slice(0, 16) + " marks=" + (marks ? marks.length : "undef"));
   const tokens = hl(content, lang);
   if (!marks || marks.length === 0) {
     return tokens.map((tk, i) => tk.cls ? <span key={i} className={tk.cls}>{tk.text}</span> : <span key={i}>{tk.text}</span>);
@@ -215,17 +216,19 @@ function renderMarkedLine(content: string, lang: string, marks?: WdMark[]): Reac
   }
   const out: React.ReactNode[] = [];
   let key = 0;
+  let abs = 0;
   for (const tk of tokens) {
     let segStart = 0;
     for (let p = 1; p <= tk.text.length; p++) {
-      const prev = markOf[segStart];
-      if (p === tk.text.length || markOf[p] !== prev) {
+      const prev = markOf[abs + segStart];
+      if (p === tk.text.length || markOf[abs + p] !== prev) {
         const seg = tk.text.slice(segStart, p);
         const cls = (tk.cls ? tk.cls + " " : "") + (prev ? `wd-${prev}` : "");
         out.push(<span key={key++} className={cls.trim() || undefined}>{seg}</span>);
         segStart = p;
       }
     }
+    abs += tk.text.length;
   }
   return out;
 }
@@ -692,6 +695,7 @@ function App() {
   wsIdRef.current = ws?.id;
   const restoreScrollRef = useRef<{ docPath: string; value: number } | null>(null);
   const restoringRef = useRef(false);
+  const ensureTreeRevealRef = useRef<((path: string) => Promise<void>) | undefined>(undefined);
   const [navHistory, setNavHistory] = useState<NavHistoryEntry[]>([]);
   const [navIndex, setNavIndex] = useState(-1);
   const navHistoryRef = useRef<NavHistoryEntry[]>([]);
@@ -729,7 +733,7 @@ function App() {
             if (e.ctrlKey && e.key === "p") { e.preventDefault(); setQuickOpen(true); setQuickQ(""); setQuickResults([]); setQuickIdx(0); }
       if (e.ctrlKey && e.key === "f" && !e.shiftKey) { e.preventDefault(); setFileSearchVisible(true); setTimeout(() => fileSearchRef.current?.focus(), 50); }
       if (e.ctrlKey && e.shiftKey && e.key === "N") { e.preventDefault(); setSymOpen(true); setSymQ(""); setSymResults([]); setSymIdx(0); }
-      if (e.ctrlKey && e.shiftKey && e.key === "F") { e.preventDefault(); setFocus(v=>!v); }
+      if (e.ctrlKey && e.shiftKey && e.key === "F") { e.preventDefault(); setSearchModalOpen(true); setSearchQ(""); setResults([]); }
       if (e.key === "Escape") { setQuickOpen(false); setFileSearchVisible(false); setFileSearch(""); setMatchIdx(0); setRefPopup(null); setSymOpen(false); setSearchModalOpen(false); setGitOpen(false); setSettingsOpen(false); setTopSearchOpen(false); setGoLineOpen(false); }
     };
     window.addEventListener("keydown", h);
@@ -947,6 +951,9 @@ function App() {
         } catch {}
       }
       restoringRef.current = false;
+      const activePath = savedTabs.length > 0 ? savedTabs[Math.min(savedActive, savedTabs.length - 1)] : null;
+      // Defer past openWorkspace's pending state updates (batch race)
+      if (activePath) setTimeout(() => ensureTreeRevealRef.current?.(activePath).catch(() => {}), 60);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -972,20 +979,19 @@ function App() {
     const parts = path.split("/");
     parts.pop();
     let cur = "";
-    let changed = false;
-    const next = { ...expandedRef.current };
     for (const part of parts) {
       cur = cur ? `${cur}/${part}` : part;
-      if (!next[cur]) {
-        try { next[cur] = await call<N[]>("file_tree", { workspaceId: ws.id, path: cur }); changed = true; } catch { return; }
-      }
+      const children = await call<N[]>("file_tree", { workspaceId: ws.id, path: cur }).catch(() => null);
+      if (!children) return;
+      // Functional merge: never depends on a possibly-stale expanded snapshot
+      setExpanded(prev => (prev[cur]?.length === children.length ? prev : { ...prev, [cur]: children }));
     }
-    if (changed) setExpanded(next);
     setTimeout(() => {
       document.querySelector(`.tree-row[data-path="${CSS.escape(path)}"]`)
         ?.scrollIntoView({ block: "nearest" });
-    }, 120);
+    }, 150);
   }, [ws]);
+  ensureTreeRevealRef.current = ensureTreeReveal;
 
   const openFile = useCallback(async (path: string, targetLine?: number, options?: { fromHistory?: boolean }) => {
     if (!ws) return;
@@ -1402,13 +1408,13 @@ function App() {
     const lines = doc.content.split("\n");
     const lineText = lines[lineIdx] || "";
     const { word, charIdx } = getWordAtClick(e, lineText);
+    setCursor({ line: lineIdx + 1, col: charIdx + 1 });
+    setCurrentLine(lineIdx + 1);
+
     if (!word || word.length < 2) {
-      setCursor({ line: lineIdx + 1, col: charIdx + 1 });
       return;
     }
 
-    setCursor({ line: lineIdx + 1, col: charIdx + 1 });
-    setCurrentLine(lineIdx + 1);
     setHighlightWord(word); setOccurrenceIdx(0);
 
     // LSP server command override for this file's language (empty = auto-detect)
