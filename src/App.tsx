@@ -665,6 +665,12 @@ function App() {
   const expandedRef = useRef<Record<string, N[]>>({});
   expandedRef.current = expanded;
   const reloadTimerRef = useRef<number | null>(null);
+  // Remembered reading position per file (scrollTop), persisted to localStorage
+  const readPosRef = useRef<Record<string, number>>(JSON.parse(localStorage.getItem("lr-read-pos") ?? "{}"));
+  const readPosTimerRef = useRef<number | null>(null);
+  const wsIdRef = useRef<string | undefined>(undefined);
+  wsIdRef.current = ws?.id;
+  const restoreScrollRef = useRef<{ docPath: string; value: number } | null>(null);
   const [navHistory, setNavHistory] = useState<NavHistoryEntry[]>([]);
   const [navIndex, setNavIndex] = useState(-1);
   const navHistoryRef = useRef<NavHistoryEntry[]>([]);
@@ -959,7 +965,14 @@ function App() {
   const openFile = useCallback(async (path: string, targetLine?: number, options?: { fromHistory?: boolean }) => {
     if (!ws) return;
     const sameFile = activeTabData?.path === path;
+    // Plain open (tree/tab switch, no explicit target): restore last reading position
+    let restoreScroll: number | undefined;
+    if (targetLine == null && !sameFile) {
+      const saved = readPosRef.current[`${ws.id}|${path}`];
+      if (saved && saved > 40) restoreScroll = saved;
+    }
     const target = targetLine ?? (sameFile ? (currentLine || 1) : 1);
+    restoreScrollRef.current = restoreScroll != null ? { docPath: path, value: restoreScroll } : null;
     try {
       setErr(null); setStatus(`Loading...`);
       const d = await call<Doc>("file_read", { workspaceId: ws.id, path });
@@ -1782,6 +1795,19 @@ function App() {
     const el = e.currentTarget;
     setScrollTop(el.scrollTop);
     setViewportH(el.clientHeight || 600);
+    const path = activeTabRef.current;
+    if (!path) return;
+    const key = `${wsIdRef.current ?? ""}|${path}`;
+    readPosRef.current[key] = el.scrollTop;
+    if (readPosTimerRef.current !== null) clearTimeout(readPosTimerRef.current);
+    readPosTimerRef.current = window.setTimeout(() => {
+      readPosTimerRef.current = null;
+      try {
+        const entries = Object.entries(readPosRef.current);
+        const trimmed = entries.length > 500 ? entries.slice(entries.length - 500) : entries;
+        localStorage.setItem("lr-read-pos", JSON.stringify(Object.fromEntries(trimmed)));
+      } catch {}
+    }, 1000);
   }, []);
     // Scroll to jump target when doc changes
   useEffect(() => {
@@ -1790,6 +1816,17 @@ function App() {
     // Only scroll when the target (file/line) actually changed. Reloads that
     // merely recreate the doc/codeLines objects must NOT yank the viewport.
     const key = `${doc.path}|${jumpTarget.line}`;
+    // Fresh open with a remembered position: restore exact scroll, skip jump scroll
+    const rk = restoreScrollRef.current;
+    if (rk && rk.docPath === doc.path) {
+      restoreScrollRef.current = null;
+      lastJumpKeyRef.current = key;
+      const timer = setTimeout(() => {
+        const el = codeRef.current;
+        if (el) el.scrollTop = rk.value;
+      }, 80);
+      return () => clearTimeout(timer);
+    }
     if (lastJumpKeyRef.current === key) return;
     lastJumpKeyRef.current = key;
     const timer = setTimeout(() => {
@@ -2106,7 +2143,7 @@ function App() {
                       <button className="btn-mini nav-btn" disabled={navIndex < 0 || navIndex >= navHistory.length - 1} onClick={() => navigateHistory("forward")} title="Forward (Alt+→)">Forward →</button>
                     </>
                   )}
-                  {!editing && <button className="btn-mini" onClick={startEdit}>编辑</button>}
+                  {!editing && doc?.language !== "image" && <button className="btn-mini" onClick={startEdit}>编辑</button>}
                   {editing && <button className="btn-mini save" onClick={saveEdit}>保存</button>}
                   {editing && <button className="btn-mini" onClick={cancelEdit}>取消</button>}
                   <span className="lang-tag">{doc.language}</span>
@@ -2174,6 +2211,11 @@ function App() {
                       style={{ fontSize: `${codeFontSize}px` }}
                     />
                   </div>
+                </div>
+              ) : doc?.language === "image" ? (
+                <div className="image-view">
+                  <img src={doc.content} alt={doc.name} />
+                  <div className="image-name">{doc.name} ? {(doc.size / 1024).toFixed(1)} KB</div>
                 </div>
               ) : (
               <pre ref={codeRef} className="code" onScroll={onCodeScroll} style={{ fontSize: `${codeFontSize}px`, lineHeight: prefs.lineSpacing, fontFamily: CODE_FONT_STACKS[prefs.codeFont], "--code-line-h": `${codeLineH}px` } as React.CSSProperties}>

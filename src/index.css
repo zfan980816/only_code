@@ -1681,3 +1681,23 @@ html, body, #root { height: 100vh; overflow: hidden; }
   font-family: "Cascadia Code", Consolas, monospace;
 }
 .status-copy:hover { background: var(--hover); color: var(--text); }
+
+/* ?? Image preview ?? */
+.image-view {
+  flex: 1; overflow: auto;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 12px; padding: 24px;
+  background:
+    repeating-conic-gradient(var(--hover) 0% 25%, transparent 0% 50%) 50% / 16px 16px;
+}
+.image-view img {
+  max-width: min(90%, 900px); max-height: calc(100% - 60px);
+  border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 8px 30px rgba(0,0,0,.12);
+  background: #fff;
+}
+.image-name {
+  font-size: 12px; color: var(--text-secondary);
+  font-family: "Cascadia Code", Consolas, monospace;
+}

@@ -159,11 +159,43 @@ pub fn file_read(workspace_id: String, path: String) -> Result<FileDocument, Str
     if !metadata.is_file() {
         return Err("path is not a file".to_string());
     }
-    if is_probably_binary(&std::fs::read(&target).map_err(|e| format!("cannot read file: {e}"))?) {
+    // Images render inline in the reader instead of being refused as binary.
+    let ext = target
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let image_mime = match ext.as_str() {
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "gif" => Some("image/gif"),
+        "webp" => Some("image/webp"),
+        "bmp" => Some("image/bmp"),
+        "ico" => Some("image/x-icon"),
+        "svg" => Some("image/svg+xml"),
+        _ => None,
+    };
+    let bytes = std::fs::read(&target).map_err(|e| format!("cannot read file: {e}"))?;
+    if let Some(mime) = image_mime {
+        use base64::Engine as _;
+        let data_uri = format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(&bytes));
+        return Ok(FileDocument {
+            path: path.clone(),
+            name: target
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_else(|| path.clone()),
+            language: "image".to_string(),
+            content: data_uri,
+            highlights: Vec::new(),
+            size: metadata.len(),
+            truncated: false,
+        });
+    }
+    if is_probably_binary(&bytes) {
         return Err("binary files are not shown".to_string());
     }
     let truncated = metadata.len() > MAX_READ_SIZE;
-    let bytes = std::fs::read(&target).map_err(|e| format!("cannot read file: {e}"))?;
     let take_len = if truncated {
         MAX_READ_SIZE.min(bytes.len() as u64) as usize
     } else {
