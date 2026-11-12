@@ -691,6 +691,7 @@ function App() {
   const wsIdRef = useRef<string | undefined>(undefined);
   wsIdRef.current = ws?.id;
   const restoreScrollRef = useRef<{ docPath: string; value: number } | null>(null);
+  const restoringRef = useRef(false);
   const [navHistory, setNavHistory] = useState<NavHistoryEntry[]>([]);
   const [navIndex, setNavIndex] = useState(-1);
   const navHistoryRef = useRef<NavHistoryEntry[]>([]);
@@ -882,7 +883,7 @@ function App() {
 
   // Session persistence: save workspace + tabs + active tab
   useEffect(() => {
-    if (!ws) return;
+    if (!ws || restoringRef.current) return;
     localStorage.setItem("lr-last-ws", ws.root);
     localStorage.setItem("lr-last-tabs", JSON.stringify(tabs.map(t => t.path)));
     localStorage.setItem("lr-last-active", String(activeTab));
@@ -914,15 +915,18 @@ function App() {
   useEffect(() => {
     const savedWs = localStorage.getItem("lr-last-ws");
     if (!savedWs) return;
+    // Read saved tabs BEFORE opening: opening the workspace rewrites these
+    // keys (persistence effect), which would otherwise erase the restore data.
+    let savedTabs: string[] = [];
+    let savedActive = 0;
+    try {
+      savedTabs = JSON.parse(localStorage.getItem("lr-last-tabs") ?? "[]");
+      savedActive = parseInt(localStorage.getItem("lr-last-active") ?? "0") || 0;
+    } catch {}
+    restoringRef.current = true;
     (async () => {
       const w = await openWorkspace(savedWs);
-      if (!w) return;
-      let savedTabs: string[] = [];
-      let savedActive = 0;
-      try {
-        savedTabs = JSON.parse(localStorage.getItem("lr-last-tabs") ?? "[]");
-        savedActive = parseInt(localStorage.getItem("lr-last-active") ?? "0") || 0;
-      } catch {}
+      if (!w) { restoringRef.current = false; return; }
       for (const path of savedTabs) {
         try {
           const d = await call<Doc>("file_read", { workspaceId: w.id, path });
@@ -942,6 +946,7 @@ function App() {
           setStatus(`${path} · ${d.language}`);
         } catch {}
       }
+      restoringRef.current = false;
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

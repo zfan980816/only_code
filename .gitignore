@@ -32,3 +32,6 @@ src-tauri/gen/schemas
 
 # local UI test captures
 /screenshot-*.png
+
+# local e2e captures
+e2e-*.png
