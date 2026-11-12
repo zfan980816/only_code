@@ -1756,3 +1756,34 @@ html, body, #root { height: 100vh; overflow: hidden; }
 .empty-title { font-size: 15.5px; font-weight: 600; color: var(--text); }
 .empty-sub { font-size: 12.5px; color: var(--muted); margin-bottom: 10px; }
 .empty-btn { padding: 8px 18px; font-size: 13px; border-radius: 8px; }
+
+/* ?? Selection ?? */
+::selection { background: rgba(53,116,240,.25); }
+.dark ::selection { background: rgba(96,165,250,.32); }
+
+/* ?? Bracket match ?? */
+.wd-bm {
+  background: var(--accent-light);
+  box-shadow: 0 0 0 1px var(--accent);
+  border-radius: 2px;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ?? Toast ?? */
+.toast {
+  position: fixed;
+  left: 50%; bottom: 46px;
+  transform: translateX(-50%);
+  background: var(--text); color: var(--bg);
+  padding: 8px 16px; border-radius: 9px;
+  font-size: 12.5px; font-weight: 600;
+  box-shadow: 0 8px 28px rgba(0,0,0,.22);
+  z-index: 60;
+  animation: toastIn .18s cubic-bezier(.4,0,.2,1);
+  pointer-events: none;
+}
+@keyframes toastIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}

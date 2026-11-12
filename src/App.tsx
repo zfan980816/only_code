@@ -139,7 +139,7 @@ function parseUnifiedDiff(text: string): ParsedDiff {
   return { hunks, additions, deletions, binary };
 }
 
-interface WdMark { start: number; end: number; type: "del" | "add"; }
+interface WdMark { start: number; end: number; type: "del" | "add" | "bm"; }
 
 function tokenizeWords(text: string): { t: string; start: number; end: number }[] {
   const re = /[A-Za-z0-9_$]+|\s+|./g;
@@ -572,13 +572,33 @@ function App() {
   const [fileSearchVisible, setFileSearchVisible] = useState(false);
   const [matchIdx, setMatchIdx] = useState(0);
   const [occurrenceIdx, setOccurrenceIdx] = useState(0);
+  const [toast, setToast] = useState("");
+  const toastTimerRef = useRef<number | null>(null);
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    if (toastTimerRef.current !== null) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => { setToast(""); toastTimerRef.current = null; }, 1800);
+  }, []);
   const [goLineOpen, setGoLineOpen] = useState(false);
   const [goLineVal, setGoLineVal] = useState("");
   const [matchLines, setMatchLines] = useState<number[]>([]);
   const codeRef = useRef<HTMLPreElement>(null);
   const lastJumpKeyRef = useRef("");
   const [searchModalOpen, setSearchModalOpen] = useState(false);
-  const [dark, setDark] = useState(() => localStorage.getItem("lr-theme") === "dark");
+  const [themeMode, setThemeMode] = useState<"light" | "dark" | "system">(
+    () => (["light", "dark", "system"].includes(localStorage.getItem("lr-theme") ?? "") ? localStorage.getItem("lr-theme") : "system") as "light" | "dark" | "system"
+  );
+  const [systemDark, setSystemDark] = useState(() =>
+    typeof window !== "undefined" && window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)").matches : false
+  );
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const fn = (e: MediaQueryListEvent) => setSystemDark(e.matches);
+    mq.addEventListener("change", fn);
+    return () => mq.removeEventListener("change", fn);
+  }, []);
+  const dark = themeMode === "system" ? systemDark : themeMode === "dark";
+  const setDark = (v: boolean) => setThemeMode(v ? "dark" : "light");
   const [gitOpen, setGitOpen] = useState(false);
   const [gitError, setGitError] = useState("");
   const [gitTab, setGitTab] = useState<"history" | "working">("history");
@@ -874,7 +894,7 @@ function App() {
   // Dark mode
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
-    localStorage.setItem("lr-theme", dark ? "dark" : "light");
+    localStorage.setItem("lr-theme", themeMode);
   }, [dark]);
   
   
@@ -1096,7 +1116,7 @@ function App() {
         e.preventDefault();
         if (activeTabData?.path) {
           navigator.clipboard.writeText(activeTabData.path).then(
-            () => setStatus(lang === "zh" ? "已复制路径" : "Path copied"),
+            () => showToast(lang === "zh" ? "路径已复制" : "Path copied"),
             () => {});
         }
       }
@@ -1710,6 +1730,37 @@ function App() {
   
   // Preserve user-expanded symbols when a document reloads after save.
 
+  // Same-line bracket match around the cursor (IDEA-style pair highlight)
+  const bracketMatch = useMemo(() => {
+    if (!doc || !cursor.line) return null;
+    const lines = doc.content.split("\n");
+    const lineText = lines[cursor.line - 1];
+    if (!lineText) return null;
+    const col = cursor.col - 1;
+    const pairs: Record<string, string> = { "(": ")", "[": "]", "{": "}", ")": "(", "]": "[", "}": "{" };
+    let at = -1;
+    if (col > 0 && "([{)]}".includes(lineText[col - 1])) at = col - 1;
+    else if (col < lineText.length && "([{)]}".includes(lineText[col])) at = col;
+    if (at < 0) return null;
+    const ch = lineText[at];
+    const isOpen = "([{".includes(ch);
+    let depth = 0;
+    if (isOpen) {
+      for (let q = at; q < lineText.length; q++) {
+        const c = lineText[q];
+        if (c === ch) depth++;
+        else if (c === pairs[ch]) { depth--; if (depth === 0) return { line: cursor.line - 1, cols: [at, q] }; }
+      }
+    } else {
+      for (let q = at; q >= 0; q--) {
+        const c = lineText[q];
+        if (c === ch) depth++;
+        else if (c === pairs[ch]) { depth--; if (depth === 0) return { line: cursor.line - 1, cols: [q, at] }; }
+      }
+    }
+    return null;
+  }, [doc, cursor]);
+
   const codeLines = useMemo(() => {
     if (!doc) return [];
     return doc.content.split("\n").map(line => {
@@ -1938,8 +1989,9 @@ function App() {
                     <div className="settings-row">
                       <div className="settings-label"><span>主题模式</span><small>亮色或暗色界面</small></div>
                       <div className="settings-segment">
-                        <button className={!dark ? "on" : ""} onClick={() => setDark(false)}>亮色</button>
-                        <button className={dark ? "on" : ""} onClick={() => setDark(true)}>暗色</button>
+                      <button className={themeMode === "light" ? "on" : ""} onClick={() => setThemeMode("light")}>亮色</button>
+                      <button className={themeMode === "system" ? "on" : ""} onClick={() => setThemeMode("system")}>跟随系统</button>
+                      <button className={themeMode === "dark" ? "on" : ""} onClick={() => setThemeMode("dark")}>暗色</button>
                       </div>
                     </div>
                   </div>
@@ -2110,7 +2162,7 @@ function App() {
                     )}
                   </div>
                   <div className="toolbar-divider" />
-                  <button className={"icon-btn " + (dark ? "on" : "")} title={dark ? "切换亮色" : "切换暗色"} onClick={() => setDark(v => !v)}>
+                  <button className={"icon-btn " + (dark ? "on" : "")} title={dark ? "切换亮色" : "切换暗色"} onClick={() => setDark(!dark)}>
                     {dark ? "☀" : "☾"}
                   </button>
                   <select className="lang-select" value={doc?.language || "text"} title="代码语言" onChange={e => changeCodeLanguage(e.target.value)}>
@@ -2284,7 +2336,9 @@ function App() {
                         {line.indent > 0 && Array.from({ length: line.indent }, (_, g) => (
                           <span key={`ig${g}`} className={"indent-guide" + (g === 0 ? " ig-zero" : "")} />
                         ))}
-                        {(isFolded && isFoldable && foldBracketPos >= 0 ? visibleTokens : line.tokens).map(renderToken)}
+                        {bracketMatch && bracketMatch.line === i && !isFolded
+                          ? renderMarkedLine(line.raw, doc.language, bracketMatch.cols.map(cc => ({ start: cc, end: cc + 1, type: "bm" as const })))
+                          : (isFolded && isFoldable && foldBracketPos >= 0 ? visibleTokens : line.tokens).map(renderToken)}
                         {isFolded && isFoldable && foldBracketPos >= 0 && (
                           <span className="fold-placeholder"
                             onClick={(e) => { e.stopPropagation(); toggleFold(i); }}
@@ -2615,6 +2669,7 @@ function App() {
         </>
       )}
 
+      {toast && <div className="toast">{toast}</div>}
       <footer className="stbar">
         <div className="status-left">
           <span className="status-dot" />
@@ -2623,7 +2678,7 @@ function App() {
         <div className="status-right">
           {activeTabData?.path && (
             <button className="status-copy" title={lang === "zh" ? "复制文件路径 (Ctrl+Shift+C)" : "Copy file path (Ctrl+Shift+C)"}
-              onClick={() => { navigator.clipboard.writeText(activeTabData.path).then(() => setStatus(lang === "zh" ? "已复制路径" : "Path copied"), () => {}); }}>
+              onClick={() => { navigator.clipboard.writeText(activeTabData.path).then(() => showToast(lang === "zh" ? "路径已复制" : "Path copied"), () => {}); }}>
               {activeTabData.path}
             </button>
           )}
