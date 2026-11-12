@@ -576,7 +576,6 @@ function App() {
   const codeRef = useRef<HTMLPreElement>(null);
   const lastJumpKeyRef = useRef("");
   const [searchModalOpen, setSearchModalOpen] = useState(false);
-  const [wsMenuOpen, setWsMenuOpen] = useState(false);
   const [dark, setDark] = useState(() => localStorage.getItem("lr-theme") === "dark");
   const [gitOpen, setGitOpen] = useState(false);
   const [gitError, setGitError] = useState("");
@@ -702,7 +701,7 @@ function App() {
       if (e.ctrlKey && e.key === "f" && !e.shiftKey) { e.preventDefault(); setFileSearchVisible(true); setTimeout(() => fileSearchRef.current?.focus(), 50); }
       if (e.ctrlKey && e.shiftKey && e.key === "N") { e.preventDefault(); setSymOpen(true); setSymQ(""); setSymResults([]); setSymIdx(0); }
       if (e.ctrlKey && e.shiftKey && e.key === "F") { e.preventDefault(); setFocus(v=>!v); }
-      if (e.key === "Escape") { setQuickOpen(false); setFileSearchVisible(false); setFileSearch(""); setMatchIdx(0); setRefPopup(null); setSymOpen(false); setSearchModalOpen(false); setWsMenuOpen(false); setGitOpen(false); setSettingsOpen(false); setTopSearchOpen(false); }
+      if (e.key === "Escape") { setQuickOpen(false); setFileSearchVisible(false); setFileSearch(""); setMatchIdx(0); setRefPopup(null); setSymOpen(false); setSearchModalOpen(false); setGitOpen(false); setSettingsOpen(false); setTopSearchOpen(false); }
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
@@ -1808,7 +1807,7 @@ function App() {
       <main className="layout">
         {!focus && (
           <aside className="activity-rail">
-            <button className="rail-item on" onClick={() => setWsMenuOpen(v => !v)} title="文件">
+            <button className="rail-item on" onClick={() => setFocus(false)} title="文件">
               <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
               <span>文件</span>
             </button>
@@ -1923,27 +1922,6 @@ function App() {
               <span>搜索文件…</span>
               <span className="panel-search-key">Ctrl+P</span>
             </button>
-            {wsMenuOpen && (
-              <>
-                <div className="ws-menu-overlay" onClick={() => setWsMenuOpen(false)} />
-                <div className="ws-menu">
-                  {wsList.map(w => (
-                    <div key={w.root} className={`ws-menu-row ${ws?.root === w.root ? "on" : ""}`}>
-                      <button className="ws-menu-item" onClick={() => { setWsMenuOpen(false); openWorkspace(w.root); }}>{w.name}</button>
-                      <button className="ws-menu-remove" title="移除" onClick={(e) => { e.stopPropagation(); removeWorkspace(w.root); }}>×</button>
-                    </div>
-                  ))}
-                  <div className="ws-menu-divider" />
-                  <button className="ws-menu-item" onClick={() => { setWsMenuOpen(false); openFolder(); }}>打开文件夹…</button>
-                  <button className="ws-menu-item" onClick={() => setLang(lang === "zh" ? "en" : "zh")}>
-                    {lang === "zh" ? "切换到 English" : "切换到 中文"}
-                  </button>
-                  <button className="ws-menu-item" onClick={() => setDark(v => !v)}>
-                    {dark ? "切换到亮色模式" : "切换到暗色模式"}
-                  </button>
-                </div>
-              </>
-            )}
               <div className="side-section-title">文件</div>
               <div className="folder-list">
                 {wsList.map(w => {
@@ -1954,7 +1932,10 @@ function App() {
                         <svg className="folder-ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
                         <span>{w.name}</span>
                       </button>
-
+                      <button className="folder-remove" title={lang === "zh" ? "从列表移除" : "Remove from list"}
+                        onClick={(e) => { e.stopPropagation(); removeWorkspace(w.root); }}>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                      </button>
                     </div>
                   );
                 })}

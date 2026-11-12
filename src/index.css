@@ -802,7 +802,18 @@ html, body, #root { height: 100vh; overflow: hidden; }
 
 /* ── Folder list ── */
 .folder-list { padding: 0 8px 12px; }
-.folder-item { margin-bottom: 1px; }
+.folder-item { margin-bottom: 1px; position: relative; }
+.folder-remove {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  width: 20px; height: 20px;
+  display: flex; align-items: center; justify-content: center;
+  border: 0; border-radius: 6px;
+  background: var(--surface); color: var(--muted);
+  cursor: pointer; opacity: 0;
+  transition: opacity .12s ease, color .12s ease, background .12s ease;
+}
+.folder-item:hover .folder-remove { opacity: 1; }
+.folder-remove:hover { color: var(--err); background: rgba(220,38,38,.12); }
 .folder-row {
   display: flex; align-items: center; gap: 9px;
   width: 100%; text-align: left;
