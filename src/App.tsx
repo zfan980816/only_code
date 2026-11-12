@@ -1641,7 +1641,7 @@ function App() {
         style={{ paddingLeft: 8 + depth * 16 }}
         onClick={() => n.isDir ? loadDir(n.path) : openFile(n.path)}>
         <span className="tree-icon">{n.isDir ? (expanded[n.path] ? "▾" : "▸") : "•"}</span>
-        <span className="tree-name">{n.name}</span>
+        <span className={"tree-name" + (!n.isDir && gitStatusByPath.get(n.path) ? ` git-fn-${gitStatusByPath.get(n.path)}` : "")}>{n.name}</span>
         {!n.isDir && gitStatusByPath.get(n.path) && (
           <span className={`git-status st-${gitStatusByPath.get(n.path)}`} title="未提交修改">{gitStatusByPath.get(n.path)}</span>
         )}
@@ -1664,7 +1664,10 @@ function App() {
   // File-tree git badges: changed file -> status letter, plus dirs containing changes
   const gitStatusByPath = useMemo(() => {
     const m = new Map<string, string>();
-    for (const f of workingFiles) m.set(f.path, (f.status || "M")[0].toUpperCase());
+    for (const f of workingFiles) {
+      const st0 = (f.status || "M")[0].toUpperCase();
+      m.set(f.path, st0 === "?" ? "U" : st0);
+    }
     return m;
   }, [workingFiles]);
   const gitDirsWithChanges = useMemo(() => {
@@ -1709,7 +1712,12 @@ function App() {
 
   const codeLines = useMemo(() => {
     if (!doc) return [];
-    return doc.content.split("\n").map(line => ({ raw: line, tokens: hl(line, doc.language) }));
+    return doc.content.split("\n").map(line => {
+      const lead = line.match(/^[ \t]*/)?.[0] ?? "";
+      let cols = 0;
+      for (const ch of lead) cols += ch === "\t" ? 4 : 1;
+      return { raw: line, tokens: hl(line, doc.language), indent: Math.floor(cols / 4) };
+    });
   }, [doc]);
   // Virtual scrolling: only render lines near the viewport for large files
   const isLargeFile = codeLines.length > 300;
@@ -2066,7 +2074,8 @@ function App() {
                 <div className="tab-bar">
                   {tabs.map((tb, i) => (
                     <div key={tb.path} className={`tab-item ${i === activeTab ? "on" : ""}`}
-                      onClick={() => switchTab(i)}>
+                      onClick={() => switchTab(i)}
+                      onMouseDown={(e) => { if (e.button === 1) { e.preventDefault(); closeTab(i); } }}>
                       <span>{tb.name}</span>
                       <button className="tab-close" onClick={(e) => { e.stopPropagation(); closeTab(i); }}>×</button>
                     </div>
@@ -2272,6 +2281,9 @@ function App() {
                         {isFoldable ? (isFolded ? "▸" : "▾") : ""}
                       </span>
                       <span className="code-text">
+                        {line.indent > 0 && Array.from({ length: line.indent }, (_, g) => (
+                          <span key={`ig${g}`} className={"indent-guide" + (g === 0 ? " ig-zero" : "")} />
+                        ))}
                         {(isFolded && isFoldable && foldBracketPos >= 0 ? visibleTokens : line.tokens).map(renderToken)}
                         {isFolded && isFoldable && foldBracketPos >= 0 && (
                           <span className="fold-placeholder"
@@ -2286,7 +2298,14 @@ function App() {
               </pre>
               )}
             </>
-          ) : <div className="no-file">{t("noFile")}</div>}
+          ) : (
+            <div className="empty-state">
+              <div className="empty-mark">LR</div>
+              <div className="empty-title">{lang === "zh" ? "打开一个文件夹开始阅读" : "Open a folder to start reading"}</div>
+              <div className="empty-sub">{lang === "zh" ? "也可以把文件夹直接拖进窗口" : "You can also drag a folder into the window"}</div>
+              <button className="btn-open empty-btn" onClick={openFolder}>{lang === "zh" ? "打开文件夹" : "Open Folder"}</button>
+            </div>
+          )}
         </section>
 
         {!focus && outlineVisible && (
