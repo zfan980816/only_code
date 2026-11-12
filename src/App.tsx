@@ -572,6 +572,8 @@ function App() {
   const [fileSearchVisible, setFileSearchVisible] = useState(false);
   const [matchIdx, setMatchIdx] = useState(0);
   const [occurrenceIdx, setOccurrenceIdx] = useState(0);
+  const [goLineOpen, setGoLineOpen] = useState(false);
+  const [goLineVal, setGoLineVal] = useState("");
   const [matchLines, setMatchLines] = useState<number[]>([]);
   const codeRef = useRef<HTMLPreElement>(null);
   const lastJumpKeyRef = useRef("");
@@ -701,7 +703,7 @@ function App() {
       if (e.ctrlKey && e.key === "f" && !e.shiftKey) { e.preventDefault(); setFileSearchVisible(true); setTimeout(() => fileSearchRef.current?.focus(), 50); }
       if (e.ctrlKey && e.shiftKey && e.key === "N") { e.preventDefault(); setSymOpen(true); setSymQ(""); setSymResults([]); setSymIdx(0); }
       if (e.ctrlKey && e.shiftKey && e.key === "F") { e.preventDefault(); setFocus(v=>!v); }
-      if (e.key === "Escape") { setQuickOpen(false); setFileSearchVisible(false); setFileSearch(""); setMatchIdx(0); setRefPopup(null); setSymOpen(false); setSearchModalOpen(false); setGitOpen(false); setSettingsOpen(false); setTopSearchOpen(false); }
+      if (e.key === "Escape") { setQuickOpen(false); setFileSearchVisible(false); setFileSearch(""); setMatchIdx(0); setRefPopup(null); setSymOpen(false); setSearchModalOpen(false); setGitOpen(false); setSettingsOpen(false); setTopSearchOpen(false); setGoLineOpen(false); }
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
@@ -932,6 +934,28 @@ function App() {
   activeTabRef.current = activeTabData?.path;
   const gitGraph = useMemo(() => computeGitGraph(gitCommits), [gitCommits]);
   const gitAuthors = useMemo(() => [...new Set(gitCommits.map(c => c.authorName).filter(Boolean))].sort((a,b)=>a.localeCompare(b)), [gitCommits]);
+  // IDEA-style "scroll from source": expand the file's parent chain in the
+  // lazy tree and scroll the row into view after opening a file.
+  const ensureTreeReveal = useCallback(async (path: string) => {
+    if (!ws) return;
+    const parts = path.split("/");
+    parts.pop();
+    let cur = "";
+    let changed = false;
+    const next = { ...expandedRef.current };
+    for (const part of parts) {
+      cur = cur ? `${cur}/${part}` : part;
+      if (!next[cur]) {
+        try { next[cur] = await call<N[]>("file_tree", { workspaceId: ws.id, path: cur }); changed = true; } catch { return; }
+      }
+    }
+    if (changed) setExpanded(next);
+    setTimeout(() => {
+      document.querySelector(`.tree-row[data-path="${CSS.escape(path)}"]`)
+        ?.scrollIntoView({ block: "nearest" });
+    }, 120);
+  }, [ws]);
+
   const openFile = useCallback(async (path: string, targetLine?: number, options?: { fromHistory?: boolean }) => {
     if (!ws) return;
     const sameFile = activeTabData?.path === path;
@@ -950,6 +974,7 @@ function App() {
       try { setSyms(await call<Sym[]>("outline", { workspaceId: ws.id, path })); } catch { setSyms([]); }
       setStatus(`${path} · ${d.language}`);
       setJumpTarget({ path, line: target });
+      ensureTreeReveal(path).catch(() => {});
 
       if (!options?.fromHistory) {
         const previous: NavHistoryEntry | undefined = activeTabData?.path
@@ -976,7 +1001,7 @@ function App() {
         setNavIndex(index);
       }
     } catch (e) { const m = String(e); setErr(m); setStatus(`ERR: ${m}`); }
-  }, [ws, tabs, activeTabData, currentLine, navHistoryRef, navIndexRef]);
+  }, [ws, tabs, activeTabData, currentLine, navHistoryRef, navIndexRef, ensureTreeReveal]);
 
   const navigateHistory = useCallback(async (direction: "back" | "forward") => {
     const stack = navHistoryRef.current;
@@ -1039,6 +1064,34 @@ function App() {
       return n;
     });
   }, [activeTab, switchTab]);
+
+  // Tab + navigation keyboard handling (browser-standard muscle memory)
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.key === "Tab") {
+        e.preventDefault();
+        if (tabs.length === 0) return;
+        const next = (activeTab + (e.shiftKey ? -1 : 1) + tabs.length) % tabs.length;
+        switchTab(next);
+      } else if (e.ctrlKey && (e.key === "w" || e.key === "W")) {
+        e.preventDefault();
+        if (tabs.length > 0) closeTab(activeTab);
+      } else if (e.ctrlKey && !e.shiftKey && (e.key === "g" || e.key === "G")) {
+        e.preventDefault();
+        if (activeTabData?.path) { setGoLineOpen(true); setGoLineVal(""); }
+      } else if (e.ctrlKey && e.shiftKey && (e.key === "C" || e.key === "c")) {
+        e.preventDefault();
+        if (activeTabData?.path) {
+          navigator.clipboard.writeText(activeTabData.path).then(
+            () => setStatus(lang === "zh" ? "已复制路径" : "Path copied"),
+            () => {});
+        }
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [tabs, activeTab, switchTab, closeTab, activeTabData, lang]);
+
 
 
   const doSearch = useCallback(async (q: string) => {
@@ -1571,7 +1624,7 @@ function App() {
     }
     return (
     <div key={n.path || n.name}>
-      <button className={`tree-row ${activeTabData?.path === n.path && !n.isDir ? "tree-active" : ""}`}
+      <button data-path={n.path} className={`tree-row ${activeTabData?.path === n.path && !n.isDir ? "tree-active" : ""}`}
         style={{ paddingLeft: 8 + depth * 16 }}
         onClick={() => n.isDir ? loadDir(n.path) : openFile(n.path)}>
         <span className="tree-icon">{n.isDir ? (expanded[n.path] ? "▾" : "▸") : "•"}</span>
@@ -2399,6 +2452,25 @@ function App() {
         </div>
       )}
 
+      {/* Go to line (Ctrl+G) */}
+      {goLineOpen && (
+        <div className="qo-overlay" onClick={() => setGoLineOpen(false)}>
+          <div className="qo-modal" onClick={e => e.stopPropagation()}>
+            <input autoFocus className="qo-input" value={goLineVal}
+              onChange={e => setGoLineVal(e.target.value.replace(/[^0-9]/g, ""))}
+              onKeyDown={e => {
+                if (e.key === "Escape") setGoLineOpen(false);
+                if (e.key === "Enter") {
+                  const n = parseInt(goLineVal || "0", 10);
+                  if (n >= 1 && activeTabData?.path) { setGoLineOpen(false); openFile(activeTabData.path, n); }
+                  else setGoLineOpen(false);
+                }
+              }}
+              placeholder="跳转到行…" spellCheck={false} />
+          </div>
+        </div>
+      )}
+
       {/* Global search modal */}      {/* Global search modal */}
       {searchModalOpen && (
         <div className="qo-overlay" onClick={() => setSearchModalOpen(false)}>
@@ -2488,6 +2560,12 @@ function App() {
           <span>{status}</span>
         </div>
         <div className="status-right">
+          {activeTabData?.path && (
+            <button className="status-copy" title={lang === "zh" ? "复制文件路径 (Ctrl+Shift+C)" : "Copy file path (Ctrl+Shift+C)"}
+              onClick={() => { navigator.clipboard.writeText(activeTabData.path).then(() => setStatus(lang === "zh" ? "已复制路径" : "Path copied"), () => {}); }}>
+              {activeTabData.path}
+            </button>
+          )}
           <span>行 {cursor.line}, 列 {cursor.col}</span>
           <span>空格: 4</span>
           <span>UTF-8</span>
