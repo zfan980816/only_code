@@ -613,6 +613,21 @@ function fileBadge(name: string): { bg: string; fg: string; label: string } {
   return FILE_BADGES[ext] ?? { bg: "var(--muted)", fg: "#fff", label: "\u00b7" };
 }
 
+function javaClassIcon(name: string): { bg: string; letter: string } | null {
+  if (!/^[A-Z]/.test(name)) return null;
+  if (/Controller$/.test(name)) return { bg: "#3592C4", letter: "C" };
+  if (/Service$/.test(name)) return { bg: "#3B9E5C", letter: "S" };
+  if (/(Properties|Config|Configuration)$/.test(name)) return { bg: "#D1683C", letter: "R" };
+  if (/Bean$/.test(name)) return { bg: "#4BA357", letter: "B" };
+  if (/Exception$/.test(name)) return { bg: "#C7551F", letter: "E" };
+  if (/Mapper$|Repository$|Dao$/.test(name)) return { bg: "#7A6FC4", letter: "D" };
+  if (/Filter$|Interceptor$|Listener$/.test(name)) return { bg: "#6B7BBF", letter: "F" };
+  if (/Util$|Utils$/.test(name)) return { bg: "#6B7BBF", letter: "U" };
+  if (/DTO$|Dto$|VO$|Item$/.test(name)) return { bg: "#7A6FC4", letter: "D" };
+  if (/Enum$/.test(name)) return { bg: "#8A6FB4", letter: "E" };
+  return { bg: "#3592C4", letter: "C" };
+}
+
 function FolderGlyph({ dim }: { dim?: boolean }) {
   return (
     <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true" className={"folder-ic-tree" + (dim ? " dim" : "")}>
@@ -1735,7 +1750,14 @@ function App() {
         <span className={"tree-chevron" + (n.isDir ? " dir" : "")}>{n.isDir ? (expanded[n.path] ? "▾" : "▸") : ""}</span>
         {n.isDir
           ? <FolderGlyph dim={n.name.startsWith(".")} />
-          : (() => { const b = fileBadge(n.name); return <span className="file-badge" style={{ background: b.bg, color: b.fg }}>{b.label}</span>; })()}
+          : (() => {
+              if (/\.java$/.test(n.name)) {
+                const ic = javaClassIcon(n.name.replace(/\.java$/, ""));
+                if (ic) return <span className="file-round" style={{ background: ic.bg }}>{ic.letter}</span>;
+              }
+              const b = fileBadge(n.name);
+              return <span className="file-badge" style={{ background: b.bg, color: b.fg }}>{b.label}</span>;
+            })()}
         <span className={"tree-name" + (!n.isDir && gitStatusByPath.get(n.path) ? ` git-fn-${gitStatusByPath.get(n.path)}` : "")}>{n.name}</span>
         {!n.isDir && gitStatusByPath.get(n.path) && (
           <span className={`git-status st-${gitStatusByPath.get(n.path)}`} title="未提交修改">{gitStatusByPath.get(n.path)}</span>
@@ -2271,7 +2293,25 @@ function App() {
               </div>
               )}
               <div className="doc-hdr">
-                <span>{activeTabData?.path}{editing && editContent !== doc?.content ? " •未保存" : ""}</span>
+                <nav className="crumbs">
+                  {(() => {
+                    const segs = (activeTabData?.path || "").split("/");
+                    return segs.map((sg, i) => {
+                      const isFile = i === segs.length - 1;
+                      const prefix = segs.slice(0, i + 1).join("/");
+                      return (
+                        <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                          {i > 0 && <span className="crumb-sep">{'\u203a'}</span>}
+                          <button className={"crumb" + (isFile ? " cur" : "")}
+                            onClick={() => { if (!isFile) ensureTreeRevealRef.current?.(prefix).catch(() => {}); }}>
+                            {sg}
+                          </button>
+                        </span>
+                      );
+                    });
+                  })()}
+                  {editing && editContent !== doc?.content && <span style={{ color: "var(--warn)", fontSize: 11 }}>{'\u2022'}{'\u672a\u4fdd\u5b58'}</span>}
+                </nav>
                 <div style={{display:"flex",gap:8,alignItems:"center"}}>
                   {!editing && (
                     <>

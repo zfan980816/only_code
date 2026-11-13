@@ -1747,8 +1747,33 @@ html, body, #root { height: 100vh; overflow: hidden; }
   font-family: "Segoe UI", system-ui, sans-serif;
 }
 .folder-ic-tree { flex-shrink: 0; }
-/* JetBrains official folder colors: light fill #EBECF0 stroke #6C707E; classic yellow variant; dark fill #43454A stroke #CED0D6 */
-.folder-ic-tree path { fill: #F5CE75; stroke: #A78B4C; stroke-width: 1; }
+/* JetBrains New UI folder icon: platform/icons/src/expui/nodes/folder.svg and folder_dark.svg */
+.folder-ic-tree path { fill: #EBECF0; stroke: #6C707E; stroke-width: 1; }
 .folder-ic-tree.dim path { fill: #E8E2D6; stroke: #B0A88F; }
 .dark .folder-ic-tree path { fill: #43454A; stroke: #CED0D6; stroke-width: 1; }
 .dark .folder-ic-tree.dim path { fill: #3A3C42; stroke: #8A8D96; }
+
+/* ── Java/round class icon ── */
+.file-round {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 15px; height: 15px; border-radius: 50%;
+  font-size: 9px; font-weight: 800; color: #fff;
+  flex-shrink: 0; font-family: "Segoe UI", system-ui, sans-serif;
+}
+
+/* ── Breadcrumb path bar (IDEA navigation bar) ── */
+.crumbs {
+  display: flex; align-items: center; gap: 2px;
+  overflow: hidden; min-width: 0; flex: 1;
+  font-size: 12px; color: var(--text-secondary);
+}
+.crumb {
+  border: 0; background: transparent;
+  color: var(--text-secondary);
+  padding: 1px 4px; border-radius: 4px;
+  cursor: pointer; white-space: nowrap;
+  font-size: 12px;
+}
+.crumb:hover { background: var(--hover); color: var(--text); }
+.crumb.cur { color: var(--text); font-weight: 600; cursor: default; }
+.crumb-sep { color: var(--muted); font-size: 11px; }
