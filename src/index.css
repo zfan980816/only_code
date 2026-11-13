@@ -1747,3 +1747,8 @@ html, body, #root { height: 100vh; overflow: hidden; }
   font-family: "Segoe UI", system-ui, sans-serif;
 }
 .folder-ic-tree { flex-shrink: 0; }
+/* JetBrains official folder colors: light fill #EBECF0 stroke #6C707E; classic yellow variant; dark fill #43454A stroke #CED0D6 */
+.folder-ic-tree path { fill: #F5CE75; stroke: #A78B4C; stroke-width: 1; }
+.folder-ic-tree.dim path { fill: #E8E2D6; stroke: #B0A88F; }
+.dark .folder-ic-tree path { fill: #43454A; stroke: #CED0D6; stroke-width: 1; }
+.dark .folder-ic-tree.dim path { fill: #3A3C42; stroke: #8A8D96; }

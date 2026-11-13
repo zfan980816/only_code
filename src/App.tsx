@@ -615,9 +615,8 @@ function fileBadge(name: string): { bg: string; fg: string; label: string } {
 
 function FolderGlyph({ dim }: { dim?: boolean }) {
   return (
-    <svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true"
-      fill={dim ? "#9A948C" : "#DBB673"}>
-      <path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z" />
+    <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true" className={"folder-ic-tree" + (dim ? " dim" : "")}>
+      <path d="M8.10584 4.34613L8.25344 4.5H8.46667H13C13.8284 4.5 14.5 5.17157 14.5 6V12.1333C14.5 12.9529 13.932 13.5 13.3667 13.5H2.63333C2.06804 13.5 1.5 12.9529 1.5 12.1333V3.86667C1.5 3.04707 2.06804 2.5 2.63333 2.5H6.1217C6.25792 2.5 6.38824 2.55557 6.48253 2.65387L8.10584 4.34613Z" />
     </svg>
   );
 }
