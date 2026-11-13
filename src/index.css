@@ -1735,3 +1735,15 @@ html, body, #root { height: 100vh; overflow: hidden; }
   from { opacity: 0; transform: translateX(-50%) translateY(8px); }
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
+
+/* ── IDEA-style tree icons ── */
+.tree-chevron { width: 12px; flex-shrink: 0; text-align: center; color: var(--muted); font-size: 10px; line-height: 1; }
+.tree-icon { display: none; }
+.file-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 17px; height: 17px; border-radius: 4px;
+  font-size: 8px; font-weight: 800;
+  flex-shrink: 0; letter-spacing: 0;
+  font-family: "Segoe UI", system-ui, sans-serif;
+}
+.folder-ic-tree { flex-shrink: 0; }

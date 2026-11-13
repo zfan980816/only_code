@@ -559,6 +559,69 @@ function DiffView({ diffText, path, onOpenFile }: { diffText: string; path: stri
   );
 }
 
+// IDEA-style file tree icons: yellow folders, per-language colored badges
+const FILE_BADGES: Record<string, { bg: string; fg: string; label: string }> = {
+  ts: { bg: "#3178C6", fg: "#fff", label: "TS" },
+  tsx: { bg: "#3178C6", fg: "#fff", label: "TS" },
+  js: { bg: "#E8C93E", fg: "#3B3305", label: "JS" },
+  jsx: { bg: "#E8C93E", fg: "#3B3305", label: "JS" },
+  mjs: { bg: "#E8C93E", fg: "#3B3305", label: "JS" },
+  cjs: { bg: "#E8C93E", fg: "#3B3305", label: "JS" },
+  py: { bg: "#3572A5", fg: "#fff", label: "PY" },
+  java: { bg: "#C7551F", fg: "#fff", label: "JV" },
+  rs: { bg: "#C96A4A", fg: "#fff", label: "RS" },
+  go: { bg: "#00ADD8", fg: "#fff", label: "GO" },
+  json: { bg: "#B5A82E", fg: "#fff", label: "{ }" },
+  md: { bg: "#4A7DBF", fg: "#fff", label: "MD" },
+  html: { bg: "#E44D26", fg: "#fff", label: "<>" },
+  htm: { bg: "#E44D26", fg: "#fff", label: "<>" },
+  css: { bg: "#5A63C6", fg: "#fff", label: "CS" },
+  scss: { bg: "#C6538C", fg: "#fff", label: "SC" },
+  less: { bg: "#5A63C6", fg: "#fff", label: "LS" },
+  vue: { bg: "#41B883", fg: "#fff", label: "VU" },
+  svelte: { bg: "#E0483C", fg: "#fff", label: "SV" },
+  sql: { bg: "#D98E33", fg: "#fff", label: "SQ" },
+  sh: { bg: "#6E9E4F", fg: "#fff", label: "SH" },
+  bash: { bg: "#6E9E4F", fg: "#fff", label: "SH" },
+  zsh: { bg: "#6E9E4F", fg: "#fff", label: "SH" },
+  yaml: { bg: "#8A7BBD", fg: "#fff", label: "YA" },
+  yml: { bg: "#8A7BBD", fg: "#fff", label: "YA" },
+  toml: { bg: "#9C5A3C", fg: "#fff", label: "TM" },
+  lua: { bg: "#4A5DBF", fg: "#fff", label: "LU" },
+  rb: { bg: "#A03B3B", fg: "#fff", label: "RB" },
+  php: { bg: "#6B7BBF", fg: "#fff", label: "PH" },
+  kt: { bg: "#9B6FC3", fg: "#fff", label: "KT" },
+  swift: { bg: "#E0663C", fg: "#fff", label: "SW" },
+  c: { bg: "#5B7BB4", fg: "#fff", label: "C" },
+  h: { bg: "#8A6FB4", fg: "#fff", label: "H" },
+  cpp: { bg: "#6B8CC4", fg: "#fff", label: "C+" },
+  cc: { bg: "#6B8CC4", fg: "#fff", label: "C+" },
+  hpp: { bg: "#8A6FB4", fg: "#fff", label: "H+" },
+  cs: { bg: "#4BA357", fg: "#fff", label: "C#" },
+  png: { bg: "#9B6FC3", fg: "#fff", label: "IMG" },
+  jpg: { bg: "#9B6FC3", fg: "#fff", label: "IMG" },
+  jpeg: { bg: "#9B6FC3", fg: "#fff", label: "IMG" },
+  gif: { bg: "#9B6FC3", fg: "#fff", label: "IMG" },
+  webp: { bg: "#9B6FC3", fg: "#fff", label: "IMG" },
+  svg: { bg: "#3B9C9C", fg: "#fff", label: "SVG" },
+  ico: { bg: "#9B6FC3", fg: "#fff", label: "ICO" },
+  lock: { bg: "#8A8A8A", fg: "#fff", label: "LK" }
+};
+
+function fileBadge(name: string): { bg: string; fg: string; label: string } {
+  const ext = name.split(".").pop()?.toLowerCase() ?? "";
+  return FILE_BADGES[ext] ?? { bg: "var(--muted)", fg: "#fff", label: "\u00b7" };
+}
+
+function FolderGlyph({ dim }: { dim?: boolean }) {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true"
+      fill={dim ? "#9A948C" : "#DBB673"}>
+      <path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z" />
+    </svg>
+  );
+}
+
 function App() {
   const [lang, setLang] = useState<Lang>("zh");
   const t = (k: string) => (L[lang] as Record<string,string>)[k] ?? k;
@@ -1670,7 +1733,10 @@ function App() {
       <button data-path={n.path} className={`tree-row ${activeTabData?.path === n.path && !n.isDir ? "tree-active" : ""}`}
         style={{ paddingLeft: 8 + depth * 16 }}
         onClick={() => n.isDir ? loadDir(n.path) : openFile(n.path)}>
-        <span className="tree-icon">{n.isDir ? (expanded[n.path] ? "▾" : "▸") : "•"}</span>
+        <span className={"tree-chevron" + (n.isDir ? " dir" : "")}>{n.isDir ? (expanded[n.path] ? "▾" : "▸") : ""}</span>
+        {n.isDir
+          ? <FolderGlyph dim={n.name.startsWith(".")} />
+          : (() => { const b = fileBadge(n.name); return <span className="file-badge" style={{ background: b.bg, color: b.fg }}>{b.label}</span>; })()}
         <span className={"tree-name" + (!n.isDir && gitStatusByPath.get(n.path) ? ` git-fn-${gitStatusByPath.get(n.path)}` : "")}>{n.name}</span>
         {!n.isDir && gitStatusByPath.get(n.path) && (
           <span className={`git-status st-${gitStatusByPath.get(n.path)}`} title="未提交修改">{gitStatusByPath.get(n.path)}</span>
